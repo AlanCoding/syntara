@@ -18,23 +18,68 @@ One Task Executor deployment, one PostgreSQL Work Store. All capacity reservatio
 
 ```mermaid
 graph LR
-    TE["Task Executor<br/>(one deployment)"]
-    PG[("PostgreSQL")]
+    subgraph AO["Automation Orchestrator"]
+        API["Syntara API"]
+        TW["Temporal Worker"]
+        TE["Task Executor"]
+        PG[("PostgreSQL<br/>(shared)")]
+    end
     PA1["Pool Agent<br/>(cluster A)"]
     PA2["Pool Agent<br/>(cluster B)"]
     GW["OpenShell Gateway<br/>(cluster C)"]
 
-    TE --> PG
+    API -->|"create execution"| PG
+    API -->|"start execution"| TW
+    TW -->|"write work item"| PG
+    TW -->|"POST /schedule"| TE
+    TE -->|"read pending work"| PG
+    TE -.->|"work complete"| TW
     TE -->|"Agent API"| PA1
     TE -->|"Agent API"| PA2
     TE -->|"gRPC"| GW
 ```
 
+Within Option A there is a sub-option on the database — see D5.
+
 **Option B — Per-cluster "standard API"**
 
-Each target cluster runs a full API instance. The control plane dispatches to cluster APIs rather than talking to K8S or OpenShell directly. Capacity tracking and back-pressure are distributed.
+Each target cluster runs a full Task Executor instance with its own Work Store. The central Temporal Worker dispatches to cluster APIs rather than a single TE. Capacity tracking and back-pressure are local to each cluster.
+
+```mermaid
+graph LR
+    subgraph AO["Automation Orchestrator"]
+        API["Syntara API"]
+        TW["Temporal Worker"]
+    end
+
+    subgraph CLA["Cluster A"]
+        TE_A["Task Executor"]
+        PG_A[("PostgreSQL")]
+        WP_A["Worker Pods"]
+    end
+
+    subgraph CLB["Cluster B"]
+        TE_B["Task Executor"]
+        PG_B[("PostgreSQL")]
+        WP_B["Worker Pods"]
+    end
+
+    API -->|"start execution"| TW
+    TW -->|"POST /submit<br/>(work item + handle)"| TE_A
+    TW -->|"POST /submit<br/>(work item + handle)"| TE_B
+    TE_A --> PG_A
+    TE_A --> WP_A
+    TE_B --> PG_B
+    TE_B --> WP_B
+    TE_A -.->|"work complete"| TW
+    TE_B -.->|"work complete"| TW
+```
 
 Back-pressure is the load-bearing problem here. A per-cluster API doesn't escape the need for a global view of capacity — you still need something that decides whether to queue or dispatch when the sum of cluster capacity is exhausted. Without a meta-scheduler, you get races. With one, you've rebuilt the singleton.
+
+**Option A drawback:** Some backends (e.g. podman warm containers) would require the Task Executor to manage worker pool lifecycle directly — pre-warming containers, replenishing pools, tracking readiness. That work mostly duplicates what OpenShell already does, and it sits awkwardly inside a service whose job is to claim and dispatch, not to manage pool infrastructure. We are mostly not interested in those backends; this drawback is noted for completeness rather than as a live concern.
+
+**Option B drawback:** The feature set we would develop in a per-cluster Task Executor — sandbox lifecycle, warm pools, capacity tracking, credential injection — overlaps heavily with what OpenShell already provides. Building it is largely reinventing OpenShell for backends where OpenShell isn't used.
 
 **Working position:** Option A. The Pool Agent / OpenShell Gateway per-cluster pattern achieves locality for K8S operations without distributing the scheduling and capacity problem.
 
@@ -98,19 +143,48 @@ Built-in container images ship with AO and are pre-registered. Custom images are
 
 ## D5: Execution plane database — shared vs. split
 
-**Question:** Does the Execution Plane share Syntara's PostgreSQL database, or does it have a separate database?
+**Question:** Does the Task Executor share Syntara's PostgreSQL instance, or does it have its own?
 
-**Option A — Shared database (current position)**
+Note: "separate database" means a separate PostgreSQL *instance*, not a separate schema. A separate schema in the same instance is what both options below use internally — see the `execution_plane` schema in the implementation. The question here is whether that schema lives on the same instance as the rest of Syntara.
 
-Work Store, Pool Registry, and Execution Targets all live in Syntara's database. Syntara API, Temporal Worker, and Task Executor all use the same connection pool.
+**Option A — Shared instance (current position)**
 
-**Option B — Separate execution plane database**
+TE tables live in the `execution_plane` schema on the same PostgreSQL instance as Syntara. Temporal Worker writes the work item to `execution_plane.work_items` before calling `POST /schedule`. `/schedule` carries no data — it is a pure wakeup. TE polls the shared database for pending work.
 
-The execution plane runs its own database instance, potentially shared with or accessible from AAP directly.
+```mermaid
+graph LR
+    TW["Temporal Worker"]
+    TE["Task Executor"]
+    PG[("PostgreSQL<br/>(shared instance)")]
 
-**Working position:** Option A. A split database adds operational complexity (two databases to back up, migrate, and monitor) with no architectural benefit unless there is a concrete requirement to serve execution plane data from a separate host — for example, if AAP needs direct database access to Syntara's execution records. Absent that requirement, shared is simpler.
+    TW -->|"write work item<br/>(incl. activity handle)"| PG
+    TW -->|"POST /schedule<br/>(no data)"| TE
+    TE -->|"read pending work"| PG
+```
 
-**Open question:** Is there a proposal to bifurcate the database for AAP integration? If yes, what specifically would AAP read or write directly?
+Syntara API can also read `execution_plane.*` tables directly for the admin UI — no extra API hop.
+
+**Option B — Separate TE instance**
+
+TE has its own PostgreSQL instance. Temporal Worker cannot write to it directly. The work item must travel to TE via its API before TE can persist it. `POST /schedule` must carry the work item payload (or a separate `POST /submit` endpoint must exist). This changes the handoff protocol.
+
+```mermaid
+graph LR
+    TW["Temporal Worker"]
+    TE["Task Executor"]
+    PG_AO[("PostgreSQL<br/>(AO instance)")]
+    PG_TE[("PostgreSQL<br/>(TE instance)")]
+
+    TW -->|"POST /submit<br/>(work item + activity handle)"| TE
+    TE -->|"persist work item"| PG_TE
+    TE -.->|"work complete"| TW
+```
+
+A separate instance could be shared with AAP if there is a requirement for AAP to read execution plane data directly at the database level.
+
+**Working position:** Option A. Option B reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change.
+
+**Open question:** Is there a proposal to give AAP direct database-level access to execution plane data? If yes, that is the only concrete reason to split the instance.
 
 ---
 
