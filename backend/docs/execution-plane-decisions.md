@@ -8,11 +8,13 @@ Each section states the options, the current working position, and what would ch
 
 ---
 
-## D1: Control plane topology — singleton vs. per-cluster
+## D1: Control plane topology — Centralized Scheduler vs. Distributed Schedulers
 
-**Question:** Does the Task Executor run once (centrally, in the Syntara control plane) or does each target cluster get its own instance?
+**Question:** Does scheduling and work queue management happen in one central Task Executor, or does each target cluster get its own Task Executor instance?
 
-**Option A — Singleton Task Executor (current position)**
+Note: execution is already distributed in both options — worker pods run per-cluster regardless. The question is where the *scheduling logic and Work Store* live.
+
+**Centralized Scheduler (current position)**
 
 One Task Executor deployment, one PostgreSQL Work Store. All capacity reservations, back-pressure decisions, and result persistence happen in one place. Per-cluster operations (pod exec, OpenShell gRPC calls) are delegated to a lightweight per-cluster agent (Pool Agent for vanilla K8S, OpenShell Gateway for OpenShell clusters).
 
@@ -39,9 +41,9 @@ graph LR
     TE -->|"gRPC"| GW
 ```
 
-Within Option A there is a sub-option on the database — see D5.
+Within Centralized Scheduler there is a sub-option on the database — see D5.
 
-**Option B — Per-cluster "standard API"**
+**Distributed Schedulers**
 
 Each target cluster runs a full Task Executor instance with its own Work Store. The central Temporal Worker dispatches to cluster APIs rather than a single TE. Capacity tracking and back-pressure are local to each cluster.
 
@@ -77,13 +79,13 @@ graph LR
 
 Back-pressure is the load-bearing problem here. A per-cluster API doesn't escape the need for a global view of capacity — you still need something that decides whether to queue or dispatch when the sum of cluster capacity is exhausted. Without a meta-scheduler, you get races. With one, you've rebuilt the singleton.
 
-**Option A drawback:** Some backends (e.g. podman warm containers) would require the Task Executor to manage worker pool lifecycle directly — pre-warming containers, replenishing pools, tracking readiness. That work mostly duplicates what OpenShell already does, and it sits awkwardly inside a service whose job is to claim and dispatch, not to manage pool infrastructure. We are mostly not interested in those backends; this drawback is noted for completeness rather than as a live concern.
+**Centralized Scheduler drawback:** Some backends (e.g. podman warm containers) would require the Task Executor to manage worker pool lifecycle directly — pre-warming containers, replenishing pools, tracking readiness. That work mostly duplicates what OpenShell already does, and it sits awkwardly inside a service whose job is to claim and dispatch, not to manage pool infrastructure. We are mostly not interested in those backends; this drawback is noted for completeness rather than as a live concern. A planned mitigation is a custom-service backend type — the TE dispatches to an operator-provided API that owns its own worker management, keeping pool lifecycle concerns out of the TE entirely (to be documented separately).
 
-**Option B drawback:** The feature set we would develop in a per-cluster Task Executor — sandbox lifecycle, warm pools, capacity tracking, credential injection — overlaps heavily with what OpenShell already provides. Building it is largely reinventing OpenShell for backends where OpenShell isn't used.
+**Distributed Schedulers drawback:** The feature set we would develop in a per-cluster Task Executor — sandbox lifecycle, warm pools, capacity tracking, credential injection — overlaps heavily with what OpenShell already provides. Building it is largely reinventing OpenShell for backends where OpenShell isn't used.
 
-**Working position:** Option A. The Pool Agent / OpenShell Gateway per-cluster pattern achieves locality for K8S operations without distributing the scheduling and capacity problem.
+**Working position:** Centralized Scheduler. The Pool Agent / OpenShell Gateway per-cluster pattern achieves locality for K8S operations without distributing the scheduling and capacity problem. Distributed Schedulers is not entirely ruled out — a future requirement (e.g. independently operable per-cluster scheduling, or a backend whose worker management cannot be expressed as a TE backend type) could push back toward it. It is not a live concern today.
 
-**What would change this:** A concrete requirement that the per-cluster API must be independently operable (e.g., the cluster owner installs and manages it without Syntara connectivity). That's an offline/air-gap topology question, not a normal-path question.
+**What would change this:** A concrete requirement that the per-cluster scheduler must be independently operable (e.g., the cluster owner installs and manages it without Syntara connectivity). That's an offline/air-gap topology question, not a normal-path question.
 
 ---
 
