@@ -20,7 +20,7 @@ One Task Executor deployment holds the Work Store and owns all scheduling decisi
 
 Note: "separate database" here means a separate PostgreSQL *instance* — not just a separate schema. Both sub-options below isolate TE tables in an `execution_plane` schema; the question is whether that schema lives on the same instance as Syntara.
 
-**D1.1.a — Shared instance (current position)**
+**D1.1.a — Shared instance**
 
 TE tables live in the `execution_plane` schema on the same PostgreSQL instance as Syntara. Temporal Worker writes the work item to `execution_plane.work_items` before calling `POST /schedule`. `/schedule` carries no data — it is a pure wakeup. TE polls the shared database for pending work.
 
@@ -80,9 +80,7 @@ graph LR
 
 A separate instance could be shared with AAP if there is a requirement for AAP to read execution plane data directly at the database level.
 
-**Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change.
-
-**Open question:** Is there a proposal to give AAP direct database-level access to execution plane data? If yes, that is the only concrete reason to choose D1.1.b.
+**Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change. AWX (and any other consumer) accesses execution plane data via the TE API, not at the database level — there is no known requirement that would force D1.1.b.
 
 ### Forward-Deployed Scheduler — definition and revival conditions
 
@@ -242,6 +240,5 @@ These require PM input to resolve — engineering cannot answer them from archit
 | PM-1 | Is on-cluster-only MVP sufficient, or do customers expect remote clusters on day 1? | Determines Phase 1 scope and Pool Agent priority |
 | PM-2 | Does AO need to install OpenShell, or is operator day-2 connection acceptable? | Determines whether installer-scope work is needed for Phase 2 |
 | PM-3 | Is there a use case where non-operators register custom container images at runtime? | Determines whether self-service image registration is in scope |
-| PM-4 | Is there a requirement to share execution plane data with AAP directly (database-level)? | Determines whether D1.1.b is needed |
-| PM-5 | What customer data is available on which workflow activity types are most used? | Drives prioritization of which worker containers ship first |
-| PM-6 | Is startup latency for OpenShell cold sandboxes acceptable for Phase 2, or is warm-pool performance a launch requirement? | Determines whether warm pools must be in Phase 2 |
+| PM-4 | What customer data is available on which workflow activity types are most used? | Drives prioritization of which worker containers ship first |
+| PM-5 | Is startup latency for OpenShell cold sandboxes acceptable for Phase 2, or is warm-pool performance a launch requirement? | Determines whether warm pools must be in Phase 2 |
