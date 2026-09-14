@@ -16,32 +16,55 @@ Note: execution is already distributed in both options — worker pods run per-c
 
 **Centralized Scheduler (current position)**
 
-One Task Executor deployment, one PostgreSQL Work Store. All capacity reservations, back-pressure decisions, and result persistence happen in one place. Per-cluster operations (pod exec, OpenShell gRPC calls) are delegated to a lightweight per-cluster agent (Pool Agent for vanilla K8S, OpenShell Gateway for OpenShell clusters).
+One Task Executor deployment. All capacity reservations, back-pressure decisions, and result persistence happen in one place. Per-cluster operations are delegated to Execution Clusters. The Task Executor is a separate service from Syntara API and Temporal Worker, though they share the same OpenShift deployment.
+
+Within Centralized Scheduler there is a sub-option on whether the PostgreSQL instance is shared between AO and TE or split — see D5 for the full discussion.
+
+*Shared PostgreSQL (current position):*
 
 ```mermaid
 graph LR
-    subgraph AO["Automation Orchestrator"]
+    subgraph AO["Syntara API + Temporal Worker"]
         API["Syntara API"]
         TW["Temporal Worker"]
-        TE["Task Executor"]
-        PG[("PostgreSQL<br/>(shared)")]
     end
-    EC1["Execution Cluster A<br/>(vanilla K8S)"]
-    EC2["Execution Cluster B<br/>(OpenShell)"]
-    EC3["Execution Cluster C<br/>(custom)"]
+    TE["Task Executor"]
+    PG[("PostgreSQL")]
+    EC1["Execution Cluster A"]
+    EC2["Execution Cluster B"]
 
     API -->|"create execution"| PG
     API -->|"start execution"| TW
     TW -->|"write work item"| PG
-    TW -->|"POST /schedule"| TE
+    TW -->|"POST /schedule<br/>(no data)"| TE
     TE -->|"read pending work"| PG
     TE -.->|"work complete"| TW
     TE --> EC1
     TE --> EC2
-    TE --> EC3
 ```
 
-Within Centralized Scheduler there is a sub-option on the database — see D5.
+*Split PostgreSQL:*
+
+```mermaid
+graph LR
+    subgraph AO["Syntara API + Temporal Worker"]
+        API["Syntara API"]
+        TW["Temporal Worker"]
+        PG_AO[("PostgreSQL (AO)")]
+    end
+    TE["Task Executor"]
+    PG_TE[("PostgreSQL (TE)")]
+    EC1["Execution Cluster A"]
+    EC2["Execution Cluster B"]
+
+    API -->|"create execution"| PG_AO
+    API -->|"start execution"| TW
+    TW -->|"POST /submit<br/>(work item + handle)"| TE
+    TE -->|"persist work item"| PG_TE
+    TE -.->|"work complete"| TW
+    TE --> EC1
+    TE --> EC2
+```
 
 **Distributed Schedulers**
 
