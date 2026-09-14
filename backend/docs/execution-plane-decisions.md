@@ -14,9 +14,13 @@ Each section states the options, the current working position, and what would ch
 
 One Task Executor deployment holds the Work Store and owns all scheduling decisions: affinity routing, cross-cluster capacity balancing, back-pressure, and result persistence. The Task Executor is a separate service from Syntara API and Temporal Worker. Execution Clusters receive dispatch calls but do not make scheduling decisions.
 
-Within Centralized Scheduler there is a sub-option on whether AO and TE share a PostgreSQL instance — see D5 for the full discussion.
+#### Shared vs. split PostgreSQL
 
-*Shared PostgreSQL:*
+Note: "separate database" means a separate PostgreSQL *instance*, not a separate schema. A separate schema in the same instance is what both options use internally — see the `execution_plane` schema in the implementation. The question is whether that schema lives on the same instance as Syntara.
+
+**Option A — Shared instance (current position)**
+
+TE tables live in the `execution_plane` schema on the same PostgreSQL instance as Syntara. Temporal Worker writes the work item to `execution_plane.work_items` before calling `POST /schedule`. `/schedule` carries no data — it is a pure wakeup. TE polls the shared database for pending work.
 
 ```mermaid
 graph LR
@@ -33,7 +37,7 @@ graph LR
 
     API -->|"create execution"| PG
     API -->|"start execution"| TW
-    TW -->|"write work item"| PG
+    TW -->|"write work item<br/>(incl. activity handle)"| PG
     TW -->|"POST /schedule<br/>(no data)"| TE
     TE -->|"read pending work"| PG
     TE -.->|"work complete"| TW
@@ -41,7 +45,11 @@ graph LR
     TE --> EC2
 ```
 
-*Split PostgreSQL:*
+Syntara API can also read `execution_plane.*` tables directly for the admin UI — no extra API hop.
+
+**Option B — Separate TE instance**
+
+TE has its own PostgreSQL instance. Temporal Worker cannot write to it directly. The work item must travel to TE via its API before TE can persist it. `POST /schedule` must carry the work item payload (or a separate `POST /submit` endpoint must exist). This changes the handoff protocol.
 
 ```mermaid
 graph LR
@@ -59,12 +67,18 @@ graph LR
 
     API -->|"create execution"| PG_AO
     API -->|"start execution"| TW
-    TW -->|"POST /submit<br/>(work item + handle)"| TE
+    TW -->|"POST /submit<br/>(work item + activity handle)"| TE
     TE -->|"persist work item"| PG_TE
     TE -.->|"work complete"| TW
     TE --> EC1
     TE --> EC2
 ```
+
+A separate instance could be shared with AAP if there is a requirement for AAP to read execution plane data directly at the database level.
+
+**Working position:** Option A. Option B reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change.
+
+**Open question:** Is there a proposal to give AAP direct database-level access to execution plane data? If yes, that is the only concrete reason to split the instance.
 
 **Drawback:** Some backends (e.g. podman warm containers) would require the Task Executor to manage worker pool lifecycle directly, duplicating what OpenShell already does. We are not interested in those backends. The planned mitigation is a custom-service backend type — the TE dispatches to an operator-provided service that owns its own worker management (to be documented separately).
 
@@ -74,9 +88,46 @@ A forward-deployed scheduler is a scheduling component that runs inside the remo
 
 A forward-deployed scheduler is not mutually exclusive with the Centralized Scheduler. A future topology might have both: the central TE owns the Work Store and makes cross-cluster capacity decisions, while a forward-deployed component handles local dispatch operations on its cluster.
 
+The forward-deployed scheduler concept could also revive if actions local to the execution cluster — such as worker management — turn out to be a poor fit for the TE's internal model and cannot be cleanly expressed as a backend type.
+
 ### Rejected: Temporal-to-Distributed Schedulers
 
 AO requires a whole-service back-pressure queue — a durable Work Store that tracks capacity and queued work across all Execution Clusters. Temporal is a workflow engine; it is not the right abstraction for managing dispatch queues. Routing Temporal directly to per-cluster forward-deployed schedulers would make Temporal the back-pressure mechanism and leave no single owner for cross-cluster capacity decisions. This is rejected.
+
+---
+
+## AWX Integration
+
+### The Task Executor as an API for AWX
+
+AWX (Automation Controller) would use the Task Executor as an external API for dispatching execution work, rather than managing execution inline as it does today. AWX becomes a consumer of the TE's dispatch interface, the same role AO's Temporal Worker plays. This is analogous to how AAP 2.5 externalized authentication into a shared service — here, execution is the shared concern being externalized.
+
+### Model morphism — open question
+
+AWX has two relevant models: `InstanceGroup` (a logical grouping of nodes, used for job routing) and `Instance` (a physical execution node with capacity).
+
+Two possible mappings, both under consideration:
+
+| AWX model | Mapping option 1 | Mapping option 2 |
+|---|---|---|
+| InstanceGroup | → ExecutionTarget | → affinity label on ExecutionTarget |
+| Instance | → (no direct equivalent) | → ExecutionTarget |
+
+Option 1 treats an InstanceGroup as a pool (ExecutionTarget = a cluster or gateway). Option 2 treats individual nodes as targets and makes InstanceGroup a routing label. The right answer depends on the granularity at which AWX currently routes jobs and whether that maps to cluster-level or node-level targeting. This needs to be resolved before AWX integration can be designed.
+
+### Compatibility and phased introduction
+
+This is not backward API compatible. AWX's job dispatch today goes through the existing execution node mesh (receptor/workceptor). The TE is a different dispatch path.
+
+Phased introduction is possible: some job types in Controller use the old mesh, others use the TE API. This allows incremental migration without a flag-day cutover, but requires Controller to maintain both paths during the transition.
+
+### Changes required in Controller
+
+- **DependencyManager**: unchanged — dependency resolution is independent of dispatch.
+- **TaskManager**: split. The portion that manages job-to-node assignment moves toward the TE (affinity routing, capacity), but Controller retains blocking rules (e.g. only one job running for a single-JT at a time).
+- **InstanceGroup and related models**: transferred to the TE service; Controller references them via TE API rather than local DB.
+- **workceptor**: effectively unused — the TE dispatch path does not use receptor.
+- **ExecutionEnvironment**: selected in Controller independently of InstanceGroup today. This is incompatible with the TE model, where the ExecutionProfile couples container image and placement. Resolution is needed — either EE selection moves into the TE, or the TE's ExecutionProfile model is made flexible enough to decouple image from placement.
 
 ---
 
@@ -134,54 +185,7 @@ Built-in container images ship with AO and are pre-registered. Custom images are
 
 ---
 
-## D5: Execution plane database — shared vs. split
-
-**Question:** Does the Task Executor share Syntara's PostgreSQL instance, or does it have its own?
-
-Note: "separate database" means a separate PostgreSQL *instance*, not a separate schema. A separate schema in the same instance is what both options below use internally — see the `execution_plane` schema in the implementation. The question here is whether that schema lives on the same instance as the rest of Syntara.
-
-**Option A — Shared instance (current position)**
-
-TE tables live in the `execution_plane` schema on the same PostgreSQL instance as Syntara. Temporal Worker writes the work item to `execution_plane.work_items` before calling `POST /schedule`. `/schedule` carries no data — it is a pure wakeup. TE polls the shared database for pending work.
-
-```mermaid
-graph LR
-    TW["Temporal Worker"]
-    TE["Task Executor"]
-    PG[("PostgreSQL<br/>(shared instance)")]
-
-    TW -->|"write work item<br/>(incl. activity handle)"| PG
-    TW -->|"POST /schedule<br/>(no data)"| TE
-    TE -->|"read pending work"| PG
-```
-
-Syntara API can also read `execution_plane.*` tables directly for the admin UI — no extra API hop.
-
-**Option B — Separate TE instance**
-
-TE has its own PostgreSQL instance. Temporal Worker cannot write to it directly. The work item must travel to TE via its API before TE can persist it. `POST /schedule` must carry the work item payload (or a separate `POST /submit` endpoint must exist). This changes the handoff protocol.
-
-```mermaid
-graph LR
-    TW["Temporal Worker"]
-    TE["Task Executor"]
-    PG_AO[("PostgreSQL<br/>(AO instance)")]
-    PG_TE[("PostgreSQL<br/>(TE instance)")]
-
-    TW -->|"POST /submit<br/>(work item + activity handle)"| TE
-    TE -->|"persist work item"| PG_TE
-    TE -.->|"work complete"| TW
-```
-
-A separate instance could be shared with AAP if there is a requirement for AAP to read execution plane data directly at the database level.
-
-**Working position:** Option A. Option B reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change.
-
-**Open question:** Is there a proposal to give AAP direct database-level access to execution plane data? If yes, that is the only concrete reason to split the instance.
-
----
-
-## D6: Remote cluster scope — Phase 3 boundary
+## D5: Remote cluster scope — Phase 3 boundary
 
 **Question:** Is multi-cluster execution (targets on remote OpenShift clusters or RHEL) in scope for Phase 1/2, or is it Phase 3?
 
