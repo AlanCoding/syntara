@@ -112,9 +112,21 @@ A separate `asyncio` background task sweeps expired claims on a configurable int
 
 **Note for AAP-92715:** The reclaim operation — transitioning stale claims back to `pending` — should be listed explicitly as a core Work Store operation alongside Enqueue, Claim, Record Result, Query, and Cancel. AAP-92715 currently calls out detectability and reclaimability as acceptance criteria but does not specify who performs the reclaim or how.
 
-### Centralized + Forward-Deployed Scheduler — contingent on worker management
+#### D1.3: Worker management location
 
-A forward-deployed scheduler is a scheduling component that runs inside the remote execution cluster, co-located with workers. In this topology the central TE still owns the Work Store and all cross-cluster capacity decisions — there is no replication of scheduling state at the cluster level. The forward-deployed component is an execution proxy, not an autonomous scheduler: it handles only the local operations that are awkward to drive remotely.
+Once the Work Scheduler claims a work item, something must acquire a specific worker from the pool and dispatch to it. The question is where that worker management logic lives. For some backends this is trivial (OpenShell manages its own workers; a custom service owns its own pool). For backends with a shared worker pool — vanilla K8s being the MVP case — the TE must coordinate which worker pod handles which work item. There are two options for where that coordination lives.
+
+**D1.3.a — Backend-specific worker management inside the TE (MVP — forced decision)**
+
+Worker management is a layer inside the TE, specific to each backend type. For vanilla K8s, after the Work Scheduler claims a work item, it delegates to the Worker Manager, which acquires a specific worker pod from the shared pool using `coordination.k8s.io/v1` Lease objects — one Lease per worker pod, with `holderIdentity` and `resourceVersion` for distributed locking. This layer only exists for the vanilla K8s shared-pool model; other backends have different or no worker-claiming layers.
+
+Worker management fits inside the TE's model here because Kubernetes Leases are a self-contained coordination primitive — the TE does not need sustained presence in the cluster to use them. The TE makes a Lease claim, dispatches to the claimed pod, and releases the Lease.
+
+For backends where the TE cannot drive worker lifecycle over a well-defined protocol, the custom-service backend type handles this: the TE dispatches to an operator-provided service that owns its own worker pool and lifecycle.
+
+**D1.3.b — Forward-Deployed component in the execution cluster (contingent)**
+
+A forward-deployed scheduler runs inside the remote execution cluster, co-located with workers. The central TE dispatches work items to it; the forward-deployed component handles local worker acquisition and dispatch. The Work Store and all cross-cluster capacity decisions remain in the central TE — the forward-deployed component has no scheduling autonomy; it is an execution proxy.
 
 ```mermaid
 graph LR
@@ -144,15 +156,9 @@ graph LR
     FDS_B -->|"manage + dispatch"| WB
 ```
 
-**The worker management problem.** The central TE's WorkerManager is designed as a swappable backend type (Vanilla K8S, OpenShell, custom service). This works cleanly when the TE can drive worker lifecycle over a well-defined protocol. The problem arises when worker management requires sustained local operation — warm pool maintenance, node health monitoring, preemption, local readiness decisions — that does not fit the stateless request/response model of a backend type. In that case, something has to live in the cluster and act autonomously, and the TE becomes a dispatcher to that thing rather than a direct manager of workers.
+This option becomes relevant if worker management for some backend genuinely requires sustained local autonomous operation — warm pool maintenance, preemption, local readiness decisions — that cannot be expressed as a stateless backend type in the TE or delegated to a custom service.
 
-**MVP resolution: backend-specific worker claiming inside the TE — forced decision.** For the vanilla K8s MVP, worker management is handled entirely within the TE using Kubernetes-native coordination. Once the Work Scheduler has claimed a work item from the Work Store, it delegates to the Worker Manager, which acquires a specific worker pod from the shared pool using `coordination.k8s.io/v1` Lease objects — one Lease per worker pod, with `holderIdentity` and `resourceVersion` for distributed locking. This is backend-specific: the Lease-based claiming mechanism only exists for the vanilla K8s shared-pool model. Other backends (OpenShell, custom service) have different or no worker-claiming layers.
-
-This is the alternative to a forward-deployed API service in the execution plane, and we are choosing it for MVP. Worker management fits inside the TE's internal model for vanilla K8s because Kubernetes Leases are a well-defined, self-contained coordination primitive — the TE does not need sustained presence in the cluster to use them. This resolves the worker management problem for the MVP scope without requiring a forward-deployed component.
-
-**Relationship to the custom-service backend type.** For backends where the TE cannot drive worker lifecycle cleanly (e.g., an opaque third-party worker pool), the custom-service backend type is planned: the TE dispatches to an operator-provided service that owns its own worker management. If that approach proves insufficient for a given backend, and worker management genuinely requires autonomous local operation, the forward-deployed topology becomes relevant.
-
-**Status:** Not accepted, not rejected. The MVP does not require it. Future backends or worker management requirements may force it. The distinction from the rejected Temporal-to-Distributed option is that the Work Store and capacity decisions remain in the central TE — the forward-deployed component has no scheduling autonomy.
+**Working position:** D1.3.a for MVP — forced by the vanilla K8s implementation (AAP-92421). D1.3.b is not rejected; it may be needed for future backends or worker management requirements that do not fit D1.3.a's model.
 
 ### Rejected: Temporal-to-Distributed Schedulers
 
