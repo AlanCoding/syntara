@@ -82,11 +82,43 @@ A separate instance could be shared with AAP if there is a requirement for AAP t
 
 **Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change. AWX (and any other consumer) accesses execution plane data via the TE API, not at the database level — there is no known requirement that would force D1.1.b.
 
-### Forward-Deployed Scheduler — definition and revival conditions
+### Centralized + Forward-Deployed Scheduler — contingent on worker management
 
-A forward-deployed scheduler is a scheduling component that runs inside the remote execution cluster, co-located with workers. It is not mutually exclusive with the Centralized Scheduler — a future topology might have both: the central TE owns the Work Store and makes cross-cluster capacity decisions, while a forward-deployed component handles local dispatch operations close to workers.
+A forward-deployed scheduler is a scheduling component that runs inside the remote execution cluster, co-located with workers. In this topology the central TE still owns the Work Store and all cross-cluster capacity decisions — there is no replication of scheduling state at the cluster level. The forward-deployed component is an execution proxy, not an autonomous scheduler: it handles only the local operations that are awkward to drive remotely.
 
-This concept could revive if actions local to the execution cluster — such as worker management — turn out to be a poor fit for the TE's internal model and cannot be cleanly expressed as a backend type.
+```mermaid
+graph LR
+    subgraph AO["AO"]
+        API["Syntara API"]
+        TW["Temporal Worker"]
+    end
+    subgraph TE_BOX["Task Executor"]
+        TE["Task Executor"]
+        WS[("Work Store")]
+    end
+    subgraph ClusterA["Execution Cluster A"]
+        FDS_A["Forward-Deployed Scheduler A"]
+        WA["Workers A"]
+    end
+    subgraph ClusterB["Execution Cluster B"]
+        FDS_B["Forward-Deployed Scheduler B"]
+        WB["Workers B"]
+    end
+
+    API -->|"start execution"| TW
+    TW -->|"work item"| TE
+    TE <--> WS
+    TE -->|"dispatch"| FDS_A
+    TE -->|"dispatch"| FDS_B
+    FDS_A -->|"manage + dispatch"| WA
+    FDS_B -->|"manage + dispatch"| WB
+```
+
+**The worker management problem.** The central TE's WorkerManager is designed as a swappable backend type (Vanilla K8S, OpenShell, custom service). This works cleanly when the TE can drive worker lifecycle over a well-defined protocol. The problem arises when worker management requires sustained local operation — warm pool maintenance, node health monitoring, preemption, local readiness decisions — that does not fit the stateless request/response model of a backend type. In that case, something has to live in the cluster and act autonomously, and the TE becomes a dispatcher to that thing rather than a direct manager of workers.
+
+**Relationship to the custom-service backend type.** The current plan handles this via a custom-service backend — an operator-provided service that owns its own worker lifecycle, which the TE dispatches to. If that approach is sufficient, the forward-deployed component is just an external service and this topology is not needed as a first-class concept. The combined topology becomes relevant only if the custom-service model is insufficient and we need to formally introduce a co-deployed component with its own lifecycle in Syntara.
+
+**Status:** Not accepted, not rejected. This topology may be forced by future requirements. The distinction from the rejected Temporal-to-Distributed option is that the Work Store and capacity decisions remain in the central TE — the forward-deployed component has no scheduling autonomy.
 
 ### Rejected: Temporal-to-Distributed Schedulers
 
