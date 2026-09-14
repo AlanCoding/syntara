@@ -14,13 +14,17 @@ Each section states the options, the current working position, and what would ch
 
 One Task Executor deployment holds the Work Store and owns all scheduling decisions: affinity routing, cross-cluster capacity balancing, back-pressure, and result persistence. The Task Executor is a separate service from Syntara API and Temporal Worker. Execution Clusters receive dispatch calls but do not make scheduling decisions.
 
-#### Shared vs. split PostgreSQL
+**Drawback:** Some backends (e.g. podman warm containers) would require the Task Executor to manage worker pool lifecycle directly, duplicating what OpenShell already does. We are not interested in those backends. The planned mitigation is a custom-service backend type — the TE dispatches to an operator-provided service that owns its own worker management (to be documented separately).
 
-Note: "separate database" means a separate PostgreSQL *instance*, not a separate schema. A separate schema in the same instance is what both options use internally — see the `execution_plane` schema in the implementation. The question is whether that schema lives on the same instance as Syntara.
+#### D1.1: Shared vs. split PostgreSQL
 
-**Option A — Shared instance (current position)**
+Note: "separate database" here means a separate PostgreSQL *instance* — not just a separate schema. Both sub-options below isolate TE tables in an `execution_plane` schema; the question is whether that schema lives on the same instance as Syntara.
+
+**D1.1.a — Shared instance (current position)**
 
 TE tables live in the `execution_plane` schema on the same PostgreSQL instance as Syntara. Temporal Worker writes the work item to `execution_plane.work_items` before calling `POST /schedule`. `/schedule` carries no data — it is a pure wakeup. TE polls the shared database for pending work.
+
+See the implementation stub: [AlanCoding:execution-plane-lib](https://github.com/syntara-orchestration/syntara/compare/devel...AlanCoding:execution-plane-lib?expand=1)
 
 ```mermaid
 graph LR
@@ -47,7 +51,7 @@ graph LR
 
 Syntara API can also read `execution_plane.*` tables directly for the admin UI — no extra API hop.
 
-**Option B — Separate TE instance**
+**D1.1.b — Separate TE database**
 
 TE has its own PostgreSQL instance. Temporal Worker cannot write to it directly. The work item must travel to TE via its API before TE can persist it. `POST /schedule` must carry the work item payload (or a separate `POST /submit` endpoint must exist). This changes the handoff protocol.
 
@@ -76,58 +80,47 @@ graph LR
 
 A separate instance could be shared with AAP if there is a requirement for AAP to read execution plane data directly at the database level.
 
-**Working position:** Option A. Option B reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change.
+**Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change.
 
-**Open question:** Is there a proposal to give AAP direct database-level access to execution plane data? If yes, that is the only concrete reason to split the instance.
+**Open question:** Is there a proposal to give AAP direct database-level access to execution plane data? If yes, that is the only concrete reason to choose D1.1.b.
 
-**Drawback:** Some backends (e.g. podman warm containers) would require the Task Executor to manage worker pool lifecycle directly, duplicating what OpenShell already does. We are not interested in those backends. The planned mitigation is a custom-service backend type — the TE dispatches to an operator-provided service that owns its own worker management (to be documented separately).
+### Forward-Deployed Scheduler — definition and revival conditions
 
-### Forward-Deployed Scheduler — definition
+A forward-deployed scheduler is a scheduling component that runs inside the remote execution cluster, co-located with workers. It is not mutually exclusive with the Centralized Scheduler — a future topology might have both: the central TE owns the Work Store and makes cross-cluster capacity decisions, while a forward-deployed component handles local dispatch operations close to workers.
 
-A forward-deployed scheduler is a scheduling component that runs inside the remote execution cluster, co-located with workers. It could handle local scheduling and dispatch operations close to the workers rather than making round-trips to the central Task Executor.
-
-A forward-deployed scheduler is not mutually exclusive with the Centralized Scheduler. A future topology might have both: the central TE owns the Work Store and makes cross-cluster capacity decisions, while a forward-deployed component handles local dispatch operations on its cluster.
-
-The forward-deployed scheduler concept could also revive if actions local to the execution cluster — such as worker management — turn out to be a poor fit for the TE's internal model and cannot be cleanly expressed as a backend type.
+This concept could revive if actions local to the execution cluster — such as worker management — turn out to be a poor fit for the TE's internal model and cannot be cleanly expressed as a backend type.
 
 ### Rejected: Temporal-to-Distributed Schedulers
 
-AO requires a whole-service back-pressure queue — a durable Work Store that tracks capacity and queued work across all Execution Clusters. Temporal is a workflow engine; it is not the right abstraction for managing dispatch queues. Routing Temporal directly to per-cluster forward-deployed schedulers would make Temporal the back-pressure mechanism and leave no single owner for cross-cluster capacity decisions. This is rejected.
+AO requires a whole-service back-pressure queue — a durable Work Store that tracks capacity and queued work across all Execution Clusters. Temporal is a workflow engine; it is not the right abstraction for managing dispatch queues. In this rejected topology, Temporal would route directly to per-cluster forward-deployed schedulers, becoming the de facto back-pressure mechanism with no single owner for cross-cluster capacity decisions.
 
----
+```mermaid
+graph LR
+    subgraph AO["AO"]
+        API["Syntara API"]
+        TW["Temporal Worker"]
+    end
+    subgraph ClusterA["Execution Cluster A"]
+        FDS_A["Scheduler A"]
+        PG_A[("Work Store A")]
+        WA["Workers A"]
+    end
+    subgraph ClusterB["Execution Cluster B"]
+        FDS_B["Scheduler B"]
+        PG_B[("Work Store B")]
+        WB["Workers B"]
+    end
 
-## AWX Integration
+    API --> TW
+    TW -->|"route to A"| FDS_A
+    TW -->|"route to B"| FDS_B
+    FDS_A --> PG_A
+    FDS_A --> WA
+    FDS_B --> PG_B
+    FDS_B --> WB
+```
 
-### The Task Executor as an API for AWX
-
-AWX (Automation Controller) would use the Task Executor as an external API for dispatching execution work, rather than managing execution inline as it does today. AWX becomes a consumer of the TE's dispatch interface, the same role AO's Temporal Worker plays. This is analogous to how AAP 2.5 externalized authentication into a shared service — here, execution is the shared concern being externalized.
-
-### Model morphism — open question
-
-AWX has two relevant models: `InstanceGroup` (a logical grouping of nodes, used for job routing) and `Instance` (a physical execution node with capacity).
-
-Two possible mappings, both under consideration:
-
-| AWX model | Mapping option 1 | Mapping option 2 |
-|---|---|---|
-| InstanceGroup | → ExecutionTarget | → affinity label on ExecutionTarget |
-| Instance | → (no direct equivalent) | → ExecutionTarget |
-
-Option 1 treats an InstanceGroup as a pool (ExecutionTarget = a cluster or gateway). Option 2 treats individual nodes as targets and makes InstanceGroup a routing label. The right answer depends on the granularity at which AWX currently routes jobs and whether that maps to cluster-level or node-level targeting. This needs to be resolved before AWX integration can be designed.
-
-### Compatibility and phased introduction
-
-This is not backward API compatible. AWX's job dispatch today goes through the existing execution node mesh (receptor/workceptor). The TE is a different dispatch path.
-
-Phased introduction is possible: some job types in Controller use the old mesh, others use the TE API. This allows incremental migration without a flag-day cutover, but requires Controller to maintain both paths during the transition.
-
-### Changes required in Controller
-
-- **DependencyManager**: unchanged — dependency resolution is independent of dispatch.
-- **TaskManager**: split. The portion that manages job-to-node assignment moves toward the TE (affinity routing, capacity), but Controller retains blocking rules (e.g. only one job running for a single-JT at a time).
-- **InstanceGroup and related models**: transferred to the TE service; Controller references them via TE API rather than local DB.
-- **workceptor**: effectively unused — the TE dispatch path does not use receptor.
-- **ExecutionEnvironment**: selected in Controller independently of InstanceGroup today. This is incompatible with the TE model, where the ExecutionProfile couples container image and placement. Resolution is needed — either EE selection moves into the TE, or the TE's ExecutionProfile model is made flexible enough to decouple image from placement.
+Problem: each cluster has its own Work Store with no cross-cluster capacity view. Temporal's task routing cannot substitute for a central back-pressure queue. **This is rejected.**
 
 ---
 
@@ -164,6 +157,8 @@ Rationale: Cold sandboxes exercise the full OpenShell dispatch path (gRPC stream
 Implement `SandboxWorkloadTemplate` + `ClaimSandbox` in Phase 2. Accepts the additional complexity in exchange for acceptable latency from the start.
 
 **Working position:** Option A. Startup latency is a performance issue, not a correctness issue. Proving the dispatch path is more valuable than optimizing it before it exists.
+
+**PM question:** Is startup latency for OpenShell cold sandboxes acceptable for Phase 2, or is warm-pool performance a launch requirement?
 
 ---
 
@@ -203,6 +198,41 @@ Built-in container images ship with AO and are pre-registered. Custom images are
 
 ---
 
+## AWX Integration
+
+### The Task Executor as an API for AWX
+
+AWX (Automation Controller) would use the Task Executor as an external API for dispatching execution work, rather than managing execution inline as it does today. AWX becomes a consumer of the TE's dispatch interface, the same role AO's Temporal Worker plays. This is analogous to how AAP 2.5 externalized authentication into a shared service — here, execution is the shared concern being externalized.
+
+### Model morphism — open question
+
+AWX has two relevant models: `InstanceGroup` (a logical grouping of nodes, used for job routing) and `Instance` (a physical execution node with capacity).
+
+Two possible mappings, both under consideration:
+
+| AWX model | Mapping option 1 | Mapping option 2 |
+|---|---|---|
+| InstanceGroup | → ExecutionTarget | → affinity label on ExecutionTarget |
+| Instance | → (no direct equivalent) | → ExecutionTarget |
+
+Option 1 treats an InstanceGroup as a pool (ExecutionTarget = a cluster or gateway). Option 2 treats individual nodes as targets and makes InstanceGroup a routing label. The right answer depends on the granularity at which AWX currently routes jobs and whether that maps to cluster-level or node-level targeting. This needs to be resolved before AWX integration can be designed.
+
+### Compatibility and phased introduction
+
+This is not backward API compatible. AWX's job dispatch today goes through the existing execution node mesh (receptor/workceptor). The TE is a different dispatch path.
+
+Phased introduction is possible: some job types in Controller use the old mesh, others use the TE API. This allows incremental migration without a flag-day cutover, but requires Controller to maintain both paths during the transition.
+
+### Changes required in Controller
+
+- **DependencyManager**: unchanged — dependency resolution is independent of dispatch.
+- **TaskManager**: split. The portion that manages job-to-node assignment moves toward the TE (affinity routing, capacity), but Controller retains blocking rules (e.g. only one job running for a single-JT at a time).
+- **InstanceGroup and related models**: transferred to the TE service; Controller references them via TE API rather than local DB.
+- **workceptor**: effectively unused — the TE dispatch path does not use receptor.
+- **ExecutionEnvironment**: selected in Controller independently of InstanceGroup today. This is incompatible with the TE model, where the ExecutionProfile couples container image and placement. Resolution is needed — either EE selection moves into the TE, or the TE's ExecutionProfile model is made flexible enough to decouple image from placement.
+
+---
+
 ## PM Feed-In Questions
 
 These require PM input to resolve — engineering cannot answer them from architecture alone.
@@ -212,6 +242,6 @@ These require PM input to resolve — engineering cannot answer them from archit
 | PM-1 | Is on-cluster-only MVP sufficient, or do customers expect remote clusters on day 1? | Determines Phase 1 scope and Pool Agent priority |
 | PM-2 | Does AO need to install OpenShell, or is operator day-2 connection acceptable? | Determines whether installer-scope work is needed for Phase 2 |
 | PM-3 | Is there a use case where non-operators register custom container images at runtime? | Determines whether self-service image registration is in scope |
-| PM-4 | Is there a requirement to share execution plane data with AAP directly (database-level)? | Determines whether a separate execution plane database is needed |
+| PM-4 | Is there a requirement to share execution plane data with AAP directly (database-level)? | Determines whether D1.1.b is needed |
 | PM-5 | What customer data is available on which workflow activity types are most used? | Drives prioritization of which worker containers ship first |
 | PM-6 | Is startup latency for OpenShell cold sandboxes acceptable for Phase 2, or is warm-pool performance a launch requirement? | Determines whether warm pools must be in Phase 2 |
