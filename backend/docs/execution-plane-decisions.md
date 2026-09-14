@@ -232,6 +232,36 @@ Built-in container images ship with AO and are pre-registered. Custom images are
 
 ---
 
+## Web service architecture
+
+### Options for serving AO and TE routes from one process
+
+Both AO and TE admin routes are expected to be served by the same FastAPI application. Two packaging approaches are viable.
+
+**Option A — AO depends on execution_plane as a Python package**
+
+The `syntara` package lists `execution_plane` as a dependency. At startup, `api/main.py` calls `app.include_router(execution_plane.router, prefix="/api/v1/execution")`. One `AsyncEngine`, one session factory, one `get_db` dependency — no changes to the existing database wiring. This is only compatible with D1.1.a (shared database); separate databases would require two engines in the same process.
+
+This is the least disruptive path: existing routing, session management, and middleware are all unchanged. The `execution_plane` package is just another domain added to the app.
+
+**Option B — Separate web entrypoint package**
+
+A third package (e.g., `syntara-web`) imports from both `syntara` and `execution_plane` and assembles the combined app. Neither domain package knows about the other. The entrypoint wires both sets of routers, both engines (if D1.1.b), and any shared middleware.
+
+This is compatible with D1.1.a or D1.1.b. It enforces a strict package boundary — `syntara` and `execution_plane` have no import dependency on each other. The cost is that `api/main.py` in `syntara` ceases to be a runnable entrypoint and becomes a library. All deployment config, startup hooks, lifespan handlers, and middleware registration move to the new package. That is a real disruption to the existing codebase.
+
+**Working position:** Option A with D1.1.a. Option B is only justified if strict package separation is a hard requirement, which it is not when the database is shared.
+
+### RBAC wiring for TE routes
+
+The existing OPA system uses string-based resource types — `PermissionChecker("execution_target", "read")` — with no Python class references in the policy registry. `build_resource_actions` auto-discovers TE resource types at startup by introspecting included routes. No manual registration is needed.
+
+Adding TE built-in policies means adding `PolicyInfo("execution_target", "read", ...)` entries to `BUILTIN_POLICIES` in `role_conventions.py`. These are plain string tuples; no import from `execution_plane` is required.
+
+The one potential AO→TE import: `PermissionChecker` accepts an optional `resource_model` argument used to look up `project_id` and labels for project-scoped checks. If TE routes pass `resource_model=ExecutionTarget`, that imports from `execution_plane` at route registration time. This is avoided if TE resources are not project-scoped — `ExecutionTarget` has no `project_id` in the current design, so this import does not arise.
+
+---
+
 ## AWX Integration
 
 ### The Task Executor as an API for AWX
