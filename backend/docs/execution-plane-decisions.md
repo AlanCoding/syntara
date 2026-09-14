@@ -2,7 +2,7 @@
 
 [AAP-90685](https://redhat.atlassian.net/browse/AAP-90685) · Parent: [ANSTRAT-1803](https://redhat.atlassian.net/browse/ANSTRAT-1803)
 
-This document surfaces the architectural choices where reasonable engineers disagree, or where PM input is needed to resolve scope. For implementation requirements see [execution-plane.md](execution-plane.md).
+Key architectural options — either still live or formally closed. For implementation requirements see [execution-plane.md](execution-plane.md).
 
 Each section states the options, the current working position, and what would change that position.
 
