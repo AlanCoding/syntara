@@ -78,11 +78,14 @@ graph LR
     TE --> EC2
 ```
 
-**Serving two databases from one web server.** If D1.1.b is chosen, the Syntara API process would need to reach both the AO PostgreSQL instance and the TE PostgreSQL instance. SQLAlchemy and asyncpg support this — create two `AsyncEngine` instances and two session factories, and inject the correct session per endpoint via FastAPI dependencies. The framework carries it without issue. The operational costs:
+**Impact on the Syntara API web server.** In D1.1.b the Syntara API web worker connects only to the AO database. It retrieves TE data by calling the TE HTTP API, not by connecting to the TE database directly. This means there is no connection doubling in the web worker. The penalty is different:
 
-- Two connection pools to configure, tune, and monitor separately.
-- Two sets of SSL/TLS credentials in the environment.
-- No cross-database joins or transactions. Queries that currently join `public.*` and `execution_plane.*` in a single SQL statement cannot do so; the application layer must make two queries and join in Python. This affects the admin UI and any monitoring views that show execution data alongside AO resources.
+- Any TE data served by the Syntara admin UI (execution status, work item history) requires an HTTP round-trip to the TE service instead of a local query.
+- Cross-resource queries that join `public.*` and `execution_plane.*` in a single SQL statement are no longer possible. The application layer must issue two queries and merge in Python, or the TE API must return pre-joined data.
+
+Connecting the Syntara API directly to the TE database to avoid this would re-couple the two services at the database level — architecturally inconsistent with the split and not the intended design.
+
+**Where double-connections do appear.** If the TE process needs to validate data that lives in the AO database (e.g. workflow existence, credentials), it must either call the AO HTTP API (clean but adds a network hop in the TE hot path) or connect directly to the AO database (a second `AsyncEngine` in the TE process). The latter would mean two connection pools in the TE worker, two SSL configs, and a direct dependency on AO's database from within the TE service. This is the version of the coupling problem that actually matters in D1.1.b.
 
 **Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change. AWX (and any other consumer) accesses execution plane data via the TE API, not at the database level — there is no known requirement that would force D1.1.b.
 
