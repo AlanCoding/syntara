@@ -86,31 +86,19 @@ graph LR
 
 **Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change. AWX (and any other consumer) accesses execution plane data via the TE API, not at the database level — there is no known requirement that would force D1.1.b.
 
-#### D1.2: Work Store recoverability — reaper mechanism
+#### D1.2: Work Store recoverability — restart reconciliation
 
-When a Work Scheduler claims a work item it writes a `claimed_at` timestamp and transitions status to `claimed`. If the TE process or its scheduler loop fails at any point before dispatch completes, the item remains in `claimed` state across restarts — nothing automatically transitions it back. The Work Store needs an explicit operation to recover stale claims:
+On TE restart, work items may be in `claimed` or `dispatched` state from before the crash. The correct first action is **reconciliation against the backend** — not timeout-based reclaiming. For vanilla K8s:
 
-```sql
-UPDATE work_items
-SET status = 'pending', claimed_at = NULL
-WHERE status = 'claimed' AND claimed_at < now() - $timeout
-```
+1. For each in-flight work item, check whether the corresponding K8s resource (Lease, pod) still exists.
+2. If it does — the job is still running. Reconnect and resume streaming output. No recovery action needed.
+3. If it doesn't — the backend is inconsistent with the Work Store. The job is gone. Transition the work item back to `pending` (retry) or `failed` depending on whether the work is recoverable.
 
-This transitions expired claims back to `pending` atomically. The configurable timeout determines how long a claim can be held before it is considered stale (acceptance criterion from AAP-92715). This applies regardless of whether the TE runs as a single process or with replicas — the process model has not been declared, and the reaper is needed either way.
+A timestamp-based "reaper" that blindly reclaims claims older than a timeout is the wrong primary mechanism — it would reclaim work items for jobs that are still running in K8s, just because the TE was down long enough. The timeout is at best a secondary safeguard for cases where K8s state is genuinely ambiguous (e.g., the K8s API is temporarily unreachable during reconciliation).
 
-Two options for where the reclaim call lives in the code:
+This reconciliation approach is backend-specific. The K8s backend can check Leases and pod status. OpenShell or a custom-service backend may have different or no reconciliation semantics.
 
-**D1.2.a — Cooperative reaping**
-
-The scheduler loop, as part of each scheduling cycle, also scans for expired claims and reclaims them before attempting new claims. No additional component. The reclaim `UPDATE` is idempotent and safe to run on every cycle.
-
-**D1.2.b — Dedicated reaper**
-
-A separate `asyncio` background task sweeps expired claims on a configurable interval, independent of the scheduler loop. Cleaner separation of concerns; the scheduler loop does one thing and the reaper cadence is tunable independently.
-
-**Working position:** Open. Either requires the same underlying Work Store operation; the choice is organizational.
-
-**Note for AAP-92715:** The reclaim operation — transitioning stale claims back to `pending` — should be listed explicitly as a core Work Store operation alongside Enqueue, Claim, Record Result, Query, and Cancel. AAP-92715 currently calls out detectability and reclaimability as acceptance criteria but does not specify who performs the reclaim or how.
+**Open question (AAP-92715):** The acceptance criteria call out stale reservations as "detectable and reclaimable" but do not describe the mechanism. The reconciliation-first approach should be stated explicitly as the recoverability model, with the backend-check step as a required Work Store operation alongside Enqueue, Claim, Record Result, Query, and Cancel.
 
 #### D1.3: Worker management location
 
