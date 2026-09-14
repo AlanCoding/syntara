@@ -8,17 +8,13 @@ Each section states the options, the current working position, and what would ch
 
 ---
 
-## D1: Control plane topology — Centralized Scheduler vs. Distributed Schedulers
+## D1: Scheduler topology
 
-**Question:** Does scheduling and work queue management happen in one central Task Executor, or does each target cluster get its own Task Executor instance?
+### Centralized Scheduler — nearly finalized
 
-Note: execution is already distributed in both options — worker pods run per-cluster regardless. The question is where the *scheduling logic and Work Store* live.
+One Task Executor deployment holds the Work Store and owns all scheduling decisions: affinity routing, cross-cluster capacity balancing, back-pressure, and result persistence. The Task Executor is a separate service from Syntara API and Temporal Worker. Execution Clusters receive dispatch calls but do not make scheduling decisions.
 
-**Centralized Scheduler (current position)**
-
-One Task Executor deployment. All capacity reservations, back-pressure decisions, and result persistence happen in one place. Per-cluster operations are delegated to Execution Clusters. The Task Executor is a separate service from Syntara API and Temporal Worker, though they share the same OpenShift deployment.
-
-Within Centralized Scheduler there is a sub-option on whether the PostgreSQL instance is shared between AO and TE or split — see D5 for the full discussion.
+Within Centralized Scheduler there is a sub-option on whether AO and TE share a PostgreSQL instance — see D5 for the full discussion.
 
 *Shared PostgreSQL:*
 
@@ -70,49 +66,17 @@ graph LR
     TE --> EC2
 ```
 
-**Distributed Schedulers**
+**Drawback:** Some backends (e.g. podman warm containers) would require the Task Executor to manage worker pool lifecycle directly, duplicating what OpenShell already does. We are not interested in those backends. The planned mitigation is a custom-service backend type — the TE dispatches to an operator-provided service that owns its own worker management (to be documented separately).
 
-Each target cluster runs a forward-deployed scheduler — a full scheduling instance with its own Work Store. The central Temporal Worker dispatches to cluster APIs rather than a single TE. Capacity tracking and back-pressure are local to each cluster.
+### Forward-Deployed Scheduler — definition
 
-```mermaid
-graph LR
-    subgraph AO["Automation Orchestrator"]
-        API["Syntara API"]
-        TW["Temporal Worker"]
-    end
+A forward-deployed scheduler is a scheduling component that runs inside the remote execution cluster, co-located with workers. It could handle local scheduling and dispatch operations close to the workers rather than making round-trips to the central Task Executor.
 
-    subgraph CLA["Cluster A"]
-        FDS_A["Forward-Deployed<br/>Scheduler"]
-        PG_A[("PostgreSQL")]
-        WP_A["Worker Pods"]
-    end
+A forward-deployed scheduler is not mutually exclusive with the Centralized Scheduler. A future topology might have both: the central TE owns the Work Store and makes cross-cluster capacity decisions, while a forward-deployed component handles local dispatch operations on its cluster.
 
-    subgraph CLB["Cluster B"]
-        FDS_B["Forward-Deployed<br/>Scheduler"]
-        PG_B[("PostgreSQL")]
-        WP_B["Worker Pods"]
-    end
+### Rejected: Temporal-to-Distributed Schedulers
 
-    API -->|"start execution"| TW
-    TW -->|"POST /submit<br/>(work item + handle)"| FDS_A
-    TW -->|"POST /submit<br/>(work item + handle)"| FDS_B
-    FDS_A --> PG_A
-    FDS_A --> WP_A
-    FDS_B --> PG_B
-    FDS_B --> WP_B
-    FDS_A -.->|"work complete"| TW
-    FDS_B -.->|"work complete"| TW
-```
-
-Back-pressure is the load-bearing problem here. A per-cluster API doesn't escape the need for a global view of capacity — you still need something that decides whether to queue or dispatch when the sum of cluster capacity is exhausted. Without a meta-scheduler, you get races. With one, you've rebuilt the singleton.
-
-**Centralized Scheduler drawback:** Some backends (e.g. podman warm containers) would require the Task Executor to manage worker pool lifecycle directly — pre-warming containers, replenishing pools, tracking readiness. That work mostly duplicates what OpenShell already does, and it sits awkwardly inside a service whose job is to claim and dispatch, not to manage pool infrastructure. We are mostly not interested in those backends; this drawback is noted for completeness rather than as a live concern. A planned mitigation is a custom-service backend type — the TE dispatches to an operator-provided API that owns its own worker management, keeping pool lifecycle concerns out of the TE entirely (to be documented separately).
-
-**Distributed Schedulers drawback:** The feature set we would develop in a per-cluster Task Executor — sandbox lifecycle, warm pools, capacity tracking, credential injection — overlaps heavily with what OpenShell already provides. Building it is largely reinventing OpenShell for backends where OpenShell isn't used.
-
-**Working position:** Centralized Scheduler. Something on the control plane must make affinity and capacity decisions — routing a work item to the right Execution Cluster based on labels, connectivity, and available capacity across all targets. With a Centralized Scheduler, the Task Executor is the natural and only owner of that decision. With Distributed Schedulers, no individual cluster-local scheduler has a global view of capacity, so there is no obvious place to balance across targets without introducing a meta-scheduler — which largely recreates the singleton. The Pool Agent / OpenShell Gateway per-cluster pattern achieves locality for K8S operations without distributing the scheduling and capacity problem. Distributed Schedulers is not entirely ruled out — a future requirement (e.g. independently operable per-cluster scheduling, or a backend whose worker management cannot be expressed as a TE backend type) could push back toward it. It is not a live concern today.
-
-**What would change this:** A concrete requirement that the per-cluster scheduler must be independently operable (e.g., the cluster owner installs and manages it without Syntara connectivity). That's an offline/air-gap topology question, not a normal-path question.
+AO requires a whole-service back-pressure queue — a durable Work Store that tracks capacity and queued work across all Execution Clusters. Temporal is a workflow engine; it is not the right abstraction for managing dispatch queues. Routing Temporal directly to per-cluster forward-deployed schedulers would make Temporal the back-pressure mechanism and leave no single owner for cross-cluster capacity decisions. This is rejected.
 
 ---
 
