@@ -86,6 +86,32 @@ graph LR
 
 **Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change. AWX (and any other consumer) accesses execution plane data via the TE API, not at the database level — there is no known requirement that would force D1.1.b.
 
+#### D1.2: Work Store recoverability — reaper mechanism
+
+When a Work Scheduler claims a work item it writes a `claimed_at` timestamp and transitions status to `claimed`. If the TE process crashes or a scheduler loop hangs, the item remains claimed indefinitely with no owner. The Work Store needs an explicit operation to recover stale claims:
+
+```sql
+UPDATE work_items
+SET status = 'pending', claimed_at = NULL
+WHERE status = 'claimed' AND claimed_at < now() - $timeout
+```
+
+This transitions expired claims back to `pending` atomically so another scheduler can pick them up. The configurable timeout determines how long a claim can be held before it is considered stale (acceptance criterion from AAP-92715).
+
+Two options for who calls this:
+
+**D1.2.a — Cooperative reaping**
+
+Each Work Scheduler instance, as part of its claim loop, also scans for expired claims from other instances and reclaims them. No additional component. The reclaim pass runs on every scheduling cycle before or after the claim attempt. In a multi-instance TE deployment the `UPDATE ... WHERE` is naturally idempotent — multiple schedulers racing to reclaim the same item is safe.
+
+**D1.2.b — Dedicated reaper**
+
+A separate `asyncio` background task sweeps expired claims on a configurable interval, independent of the scheduler loop. Cleaner separation of concerns; the scheduler loop does one thing. Multiple TE instances each running a dedicated reaper is safe — the same idempotent `UPDATE` applies.
+
+**Working position:** Open. D1.2.a is simpler to deploy (no additional task to manage) and correct (the reclaim `UPDATE` is idempotent under concurrent schedulers). D1.2.b is cleaner to reason about and easier to tune independently from scheduling cadence. Either requires the same underlying Work Store operation; the choice is organizational.
+
+**Note for AAP-92715:** The reclaim operation — transitioning stale claims back to `pending` — should be listed explicitly as a core Work Store operation alongside Enqueue, Claim, Record Result, Query, and Cancel. AAP-92715 currently calls out detectability and reclaimability as acceptance criteria but does not specify who performs the reclaim or how.
+
 ### Centralized + Forward-Deployed Scheduler — contingent on worker management
 
 A forward-deployed scheduler is a scheduling component that runs inside the remote execution cluster, co-located with workers. In this topology the central TE still owns the Work Store and all cross-cluster capacity decisions — there is no replication of scheduling state at the cluster level. The forward-deployed component is an execution proxy, not an autonomous scheduler: it handles only the local operations that are awkward to drive remotely.
