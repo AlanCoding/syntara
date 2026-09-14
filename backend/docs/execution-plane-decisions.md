@@ -88,7 +88,7 @@ graph LR
 
 #### D1.2: Work Store recoverability — reaper mechanism
 
-When a Work Scheduler claims a work item it writes a `claimed_at` timestamp and transitions status to `claimed`. If the TE process crashes or a scheduler loop hangs, the item remains claimed indefinitely with no owner. The Work Store needs an explicit operation to recover stale claims:
+When a Work Scheduler claims a work item it writes a `claimed_at` timestamp and transitions status to `claimed`. If the TE process or its scheduler loop fails at any point before dispatch completes, the item remains in `claimed` state across restarts — nothing automatically transitions it back. The Work Store needs an explicit operation to recover stale claims:
 
 ```sql
 UPDATE work_items
@@ -96,19 +96,19 @@ SET status = 'pending', claimed_at = NULL
 WHERE status = 'claimed' AND claimed_at < now() - $timeout
 ```
 
-This transitions expired claims back to `pending` atomically so another scheduler can pick them up. The configurable timeout determines how long a claim can be held before it is considered stale (acceptance criterion from AAP-92715).
+This transitions expired claims back to `pending` atomically. The configurable timeout determines how long a claim can be held before it is considered stale (acceptance criterion from AAP-92715). This applies regardless of whether the TE runs as a single process or with replicas — the process model has not been declared, and the reaper is needed either way.
 
-Two options for who calls this:
+Two options for where the reclaim call lives in the code:
 
 **D1.2.a — Cooperative reaping**
 
-Each Work Scheduler instance, as part of its claim loop, also scans for expired claims from other instances and reclaims them. No additional component. The reclaim pass runs on every scheduling cycle before or after the claim attempt. In a multi-instance TE deployment the `UPDATE ... WHERE` is naturally idempotent — multiple schedulers racing to reclaim the same item is safe.
+The scheduler loop, as part of each scheduling cycle, also scans for expired claims and reclaims them before attempting new claims. No additional component. The reclaim `UPDATE` is idempotent and safe to run on every cycle.
 
 **D1.2.b — Dedicated reaper**
 
-A separate `asyncio` background task sweeps expired claims on a configurable interval, independent of the scheduler loop. Cleaner separation of concerns; the scheduler loop does one thing. Multiple TE instances each running a dedicated reaper is safe — the same idempotent `UPDATE` applies.
+A separate `asyncio` background task sweeps expired claims on a configurable interval, independent of the scheduler loop. Cleaner separation of concerns; the scheduler loop does one thing and the reaper cadence is tunable independently.
 
-**Working position:** Open. D1.2.a is simpler to deploy (no additional task to manage) and correct (the reclaim `UPDATE` is idempotent under concurrent schedulers). D1.2.b is cleaner to reason about and easier to tune independently from scheduling cadence. Either requires the same underlying Work Store operation; the choice is organizational.
+**Working position:** Open. Either requires the same underlying Work Store operation; the choice is organizational.
 
 **Note for AAP-92715:** The reclaim operation — transitioning stale claims back to `pending` — should be listed explicitly as a core Work Store operation alongside Enqueue, Claim, Record Result, Query, and Cancel. AAP-92715 currently calls out detectability and reclaimability as acceptance criteria but does not specify who performs the reclaim or how.
 
