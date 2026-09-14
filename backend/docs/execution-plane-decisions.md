@@ -45,7 +45,7 @@ Within Centralized Scheduler there is a sub-option on the database — see D5.
 
 **Distributed Schedulers**
 
-Each target cluster runs a full Task Executor instance with its own Work Store. The central Temporal Worker dispatches to cluster APIs rather than a single TE. Capacity tracking and back-pressure are local to each cluster.
+Each target cluster runs a forward-deployed scheduler — a full scheduling instance with its own Work Store. The central Temporal Worker dispatches to cluster APIs rather than a single TE. Capacity tracking and back-pressure are local to each cluster.
 
 ```mermaid
 graph LR
@@ -55,26 +55,26 @@ graph LR
     end
 
     subgraph CLA["Cluster A"]
-        TE_A["Task Executor"]
+        FDS_A["Forward-Deployed<br/>Scheduler"]
         PG_A[("PostgreSQL")]
         WP_A["Worker Pods"]
     end
 
     subgraph CLB["Cluster B"]
-        TE_B["Task Executor"]
+        FDS_B["Forward-Deployed<br/>Scheduler"]
         PG_B[("PostgreSQL")]
         WP_B["Worker Pods"]
     end
 
     API -->|"start execution"| TW
-    TW -->|"POST /submit<br/>(work item + handle)"| TE_A
-    TW -->|"POST /submit<br/>(work item + handle)"| TE_B
-    TE_A --> PG_A
-    TE_A --> WP_A
-    TE_B --> PG_B
-    TE_B --> WP_B
-    TE_A -.->|"work complete"| TW
-    TE_B -.->|"work complete"| TW
+    TW -->|"POST /submit<br/>(work item + handle)"| FDS_A
+    TW -->|"POST /submit<br/>(work item + handle)"| FDS_B
+    FDS_A --> PG_A
+    FDS_A --> WP_A
+    FDS_B --> PG_B
+    FDS_B --> WP_B
+    FDS_A -.->|"work complete"| TW
+    FDS_B -.->|"work complete"| TW
 ```
 
 Back-pressure is the load-bearing problem here. A per-cluster API doesn't escape the need for a global view of capacity — you still need something that decides whether to queue or dispatch when the sum of cluster capacity is exhausted. Without a meta-scheduler, you get races. With one, you've rebuilt the singleton.
