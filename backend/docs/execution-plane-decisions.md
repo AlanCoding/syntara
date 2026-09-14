@@ -86,7 +86,7 @@ graph LR
 
 **Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change. AWX (and any other consumer) accesses execution plane data via the TE API, not at the database level — there is no known requirement that would force D1.1.b.
 
-#### D1.2: Work Store recoverability — restart reconciliation
+#### Q1: Work Store recoverability — restart reconciliation (not yet fully described)
 
 On TE restart, work items may be in `claimed` or `dispatched` state from before the crash. The correct first action is **reconciliation against the backend** — not timeout-based reclaiming. For vanilla K8s:
 
@@ -98,17 +98,9 @@ A timestamp-based "reaper" that blindly reclaims claims older than a timeout is 
 
 This reconciliation approach is backend-specific. The K8s backend can check Leases and pod status. OpenShell or a custom-service backend may have different or no reconciliation semantics.
 
-**D1.2.a — Startup-only reconciliation**
+Live K8s failure detection (pod OOM-killed, node evicted) while the TE is running is the WorkerManager's responsibility — it holds the connection to the worker and is the first to know when it breaks. This is separate from restart reconciliation.
 
-Reconcile once when the TE process starts. Simpler. Does not catch mid-run K8s failures (pod OOM-killed, node evicted) that happen while the TE is running — those are only discovered on the next restart.
-
-**D1.2.b — Continuous reconciliation**
-
-A background loop periodically checks all in-flight work items against the backend. Catches K8s failures without requiring a TE restart. Adds a background task and per-item backend queries on every cycle.
-
-**Working position:** Open. Startup-only is the minimum required. Whether continuous reconciliation is needed depends on how often K8s mid-run failures occur and whether Temporal's heartbeat mechanism already surfaces them adequately.
-
-**WorkerManager protocol implication:** Reconciliation requires backends to be queryable, not just dispatchable. The current `WorkerManager` protocol only defines `dispatch()`. A `check_status(work_item)` method — returning whether the backend resource exists and whether it is still running — is needed for reconciliation to work across backend types. Custom-service backends must expose a status endpoint; backends that cannot report status fall back to timeout-based inference. This is a required addition to the protocol spec (AAP-92715).
+**Open sub-question:** The happy path — how output streams back from the worker and how the TE knows the job is done — has not been described. Understanding that flow is prerequisite to fully specifying reconciliation. Also open: whether the `WorkerManager` protocol needs a `check_status()` method alongside `dispatch()`, and whether startup-only reconciliation is sufficient or a continuous background check is needed.
 
 #### D1.3: Worker management location
 
