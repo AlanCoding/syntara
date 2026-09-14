@@ -20,15 +20,17 @@ One Task Executor deployment. All capacity reservations, back-pressure decisions
 
 Within Centralized Scheduler there is a sub-option on whether the PostgreSQL instance is shared between AO and TE or split — see D5 for the full discussion.
 
-*Shared PostgreSQL (current position):*
+*Shared PostgreSQL:*
 
 ```mermaid
 graph LR
-    subgraph AO["Syntara API + Temporal Worker"]
+    subgraph AO["AO"]
         API["Syntara API"]
         TW["Temporal Worker"]
     end
-    TE["Task Executor"]
+    subgraph TE_BOX["Task Executor"]
+        TE["Task Executor"]
+    end
     PG[("PostgreSQL")]
     EC1["Execution Cluster A"]
     EC2["Execution Cluster B"]
@@ -47,13 +49,15 @@ graph LR
 
 ```mermaid
 graph LR
-    subgraph AO["Syntara API + Temporal Worker"]
+    subgraph AO["AO"]
         API["Syntara API"]
         TW["Temporal Worker"]
         PG_AO[("PostgreSQL (AO)")]
     end
-    TE["Task Executor"]
-    PG_TE[("PostgreSQL (TE)")]
+    subgraph TE_BOX["Task Executor"]
+        TE["Task Executor"]
+        PG_TE[("PostgreSQL (TE)")]
+    end
     EC1["Execution Cluster A"]
     EC2["Execution Cluster B"]
 
