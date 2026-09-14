@@ -98,7 +98,17 @@ A timestamp-based "reaper" that blindly reclaims claims older than a timeout is 
 
 This reconciliation approach is backend-specific. The K8s backend can check Leases and pod status. OpenShell or a custom-service backend may have different or no reconciliation semantics.
 
-**Open question (AAP-92715):** The acceptance criteria call out stale reservations as "detectable and reclaimable" but do not describe the mechanism. The reconciliation-first approach should be stated explicitly as the recoverability model, with the backend-check step as a required Work Store operation alongside Enqueue, Claim, Record Result, Query, and Cancel.
+**D1.2.a — Startup-only reconciliation**
+
+Reconcile once when the TE process starts. Simpler. Does not catch mid-run K8s failures (pod OOM-killed, node evicted) that happen while the TE is running — those are only discovered on the next restart.
+
+**D1.2.b — Continuous reconciliation**
+
+A background loop periodically checks all in-flight work items against the backend. Catches K8s failures without requiring a TE restart. Adds a background task and per-item backend queries on every cycle.
+
+**Working position:** Open. Startup-only is the minimum required. Whether continuous reconciliation is needed depends on how often K8s mid-run failures occur and whether Temporal's heartbeat mechanism already surfaces them adequately.
+
+**WorkerManager protocol implication:** Reconciliation requires backends to be queryable, not just dispatchable. The current `WorkerManager` protocol only defines `dispatch()`. A `check_status(work_item)` method — returning whether the backend resource exists and whether it is still running — is needed for reconciliation to work across backend types. Custom-service backends must expose a status endpoint; backends that cannot report status fall back to timeout-based inference. This is a required addition to the protocol spec (AAP-92715).
 
 #### D1.3: Worker management location
 
