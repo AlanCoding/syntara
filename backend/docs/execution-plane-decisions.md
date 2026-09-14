@@ -78,7 +78,11 @@ graph LR
     TE --> EC2
 ```
 
-A separate instance could be shared with AAP if there is a requirement for AAP to read execution plane data directly at the database level.
+**Serving two databases from one web server.** If D1.1.b is chosen, the Syntara API process would need to reach both the AO PostgreSQL instance and the TE PostgreSQL instance. SQLAlchemy and asyncpg support this — create two `AsyncEngine` instances and two session factories, and inject the correct session per endpoint via FastAPI dependencies. The framework carries it without issue. The operational costs:
+
+- Two connection pools to configure, tune, and monitor separately.
+- Two sets of SSL/TLS credentials in the environment.
+- No cross-database joins or transactions. Queries that currently join `public.*` and `execution_plane.*` in a single SQL statement cannot do so; the application layer must make two queries and join in Python. This affects the admin UI and any monitoring views that show execution data alongside AO resources.
 
 **Working position:** D1.1.a. D1.1.b reintroduces a data-in-the-HTTP-call design that complicates idempotency and recovery. Shared instance with schema separation gives strong isolation without the protocol change. AWX (and any other consumer) accesses execution plane data via the TE API, not at the database level — there is no known requirement that would force D1.1.b.
 
@@ -260,6 +264,20 @@ Phased introduction is possible: some job types in Controller use the old mesh, 
 - **InstanceGroup and related models**: transferred to the TE service; Controller references them via TE API rather than local DB.
 - **workceptor**: effectively unused — the TE dispatch path does not use receptor.
 - **ExecutionEnvironment**: selected in Controller independently of InstanceGroup today. This is incompatible with the TE model, where the ExecutionProfile couples container image and placement. Resolution is needed — either EE selection moves into the TE, or the TE's ExecutionProfile model is made flexible enough to decouple image from placement.
+
+### RBAC incompatibility — hard constraint
+
+Syntara uses OPA (Open Policy Agent) with Rego policies evaluated against Syntara's user and resource model. AWX has its own RBAC system built on Django's permission layer, with roles (admin, auditor, use, execute) scoped per resource. These are not compatible. A shared TE cannot evaluate both simultaneously.
+
+The only workable boundary is **service-to-service authentication** at the TE: the TE treats AO and AWX as trusted system-level callers and does not evaluate end-user RBAC itself. Each calling system is responsible for authorizing the operation before calling the TE. The TE authenticates the caller as a known system (mTLS, signed JWT, or API key) and dispatches the work.
+
+This resolves the RBAC mismatch but creates three downstream requirements:
+
+- **Tenant isolation in the Work Store.** If AO and AWX share a TE, their work items live in the same `execution_plane` schema. A `tenant` column (or equivalent namespace) is required to scope all queries and prevent cross-tenant visibility.
+- **Caller-asserted user context for audit.** The TE cannot independently determine who initiated a job. Each work item must carry a caller-provided user identifier so audit logs are meaningful. The TE trusts the caller's assertion.
+- **Capacity accounting per tenant.** If AO and AWX share execution capacity, some model for per-tenant quotas or priority is needed. This has no natural home in the current TE design.
+
+These requirements make a shared TE significantly more complex than a dedicated one. A dedicated TE per product (AO's TE and AWX's TE separately) avoids all three, at the cost of duplicated infrastructure.
 
 ---
 
