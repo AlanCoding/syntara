@@ -645,6 +645,7 @@ api-spec-drift-public: ## Check that committed public spec matches the generated
 api-spec-bundle-ep: ## Generate the Execution Plane OpenAPI spec from the FastAPI router
 	@echo "📦 Generating Execution Plane OpenAPI spec..."
 	@uv run python tools/export_openapi.py --ep -o $(OPENAPI_EP_SPEC) 2>/dev/null
+	@uv run pre-commit run yamlfmt --files $(OPENAPI_EP_SPEC) > /dev/null 2>&1 || true
 	@echo "✅ EP spec written to $(OPENAPI_EP_SPEC)"
 
 .PHONY: api-spec-drift-ep
