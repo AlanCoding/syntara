@@ -130,9 +130,6 @@ export interface components {
     /**
      * WorkItem
      * @description A unit of work written by the Temporal Worker and consumed by the Task Executor.
-     *
-     *     Temporal writes this row (including the activity_handle) before calling POST /schedule.
-     *     The Task Executor polls for PENDING rows, claims them, dispatches, and writes the result.
      */
     WorkItem: {
       /**
