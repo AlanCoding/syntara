@@ -89,11 +89,9 @@ flowchart LR
     EPWS -->|"query"| EPDB
     EPW -->|"poll / LISTEN"| EPDB
 
-    EPW -->|"option A: gRPC handle.complete()\n(port 7233, direct to Temporal)"| T
+    EPW -->|"POST /result-callback"| SW
+    SW -->|"gRPC handle.complete()\n(port 7233)"| T
     T -->|"activity resumed"| STW
-
-    EPW -. "option B [speculative]:\nPOST /result-callback" .-> SW
-    SW -. "handle.complete() gRPC\n(port 7233)" .-> T
 ```
 
 ---
