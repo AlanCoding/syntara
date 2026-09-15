@@ -37,7 +37,7 @@ flowchart TD
 
     C -->|"GET /api/v1/workflows/"| SW
     C -->|"GET /api/execution-plane/v1/execution-targets"| SW
-    SW -->|"EP router mounted here;\nquery execution_plane schema"| DB
+    SW -->|"SELECT execution_plane.execution_targets"| DB
 
     SW -->|"schedule script activity"| STW
     STW -->|"INSERT work_items\n+ pg_notify\n⚠ boundary crossing"| DB
