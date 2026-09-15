@@ -62,20 +62,19 @@ or host when EP becomes a standalone service.
 ```mermaid
 flowchart LR
     C([Client])
+    SDB[("Syntara PostgreSQL")]
+    EPDB[("EP PostgreSQL")]
 
     subgraph syn["Syntara"]
         SW["Web Server"]
         STW["Temporal Worker"]
-        SDB[("Syntara PostgreSQL")]
+        T["Temporal Frontend\n:7233"]
     end
 
     subgraph epservice["EP Service (future standalone)"]
         EPWS["EP Web Server"]
         EPW["EP Worker"]
-        EPDB[("EP PostgreSQL")]
     end
-
-    T["Temporal Frontend\n:7233"]
 
     C -->|"GET /api/v1/workflows/"| SW
     C -->|"GET /api/execution-plane/v1/execution-targets"| SW
