@@ -13,6 +13,93 @@ crossing that must be replaced before EP can run as an independent service.
 
 ---
 
+## Architecture diagrams
+
+### Current state
+
+The EP router is temporarily mounted inside the Syntara web server. Work is
+submitted by writing directly to the shared database rather than calling an API.
+
+```mermaid
+flowchart LR
+    C([Client])
+
+    subgraph syn["Syntara"]
+        SW["Web Server"]
+        STW["Temporal Worker"]
+    end
+
+    subgraph ep["EP Worker (separate container)"]
+        EPW["Worker Process"]
+    end
+
+    DB[("Shared PostgreSQL\n(syntara + execution_plane schemas)")]
+    T["Temporal Frontend\n:7233"]
+
+    C -->|"GET /api/v1/workflows/"| SW
+    C -->|"GET /api/execution-plane/v1/execution-targets"| SW
+    SW -->|"EP router mounted here;\nquery execution_plane schema"| DB
+
+    SW -->|"schedule script activity"| STW
+    STW -->|"INSERT work_items\n+ pg_notify\n⚠ boundary crossing"| DB
+    STW -.->|"raise_complete_async\n(activity suspends)"| T
+
+    DB -->|"LISTEN wakes worker;\nSELECT FOR UPDATE"| EPW
+    EPW -->|"gRPC handle.complete()\n(port 7233)"| T
+    T -->|"activity resumed"| STW
+```
+
+---
+
+### Future state: EP as an independent service
+
+The boxes below labelled **[speculative]** are not decided — the exact
+mechanism for routing and auth is still open. The proxying path in particular
+may be replaced by something entirely different (a separate subdomain, a
+redirect, no public exposure of EP endpoints at all). The key point is that
+`/api/execution-plane/` is a temporary path — it may move to a different path
+or host when EP becomes a standalone service.
+
+```mermaid
+flowchart LR
+    C([Client])
+
+    subgraph syn["Syntara"]
+        SW["Web Server"]
+        STW["Temporal Worker"]
+        SDB[("Syntara PostgreSQL")]
+    end
+
+    subgraph epservice["EP Service (future standalone)"]
+        EPWS["EP Web Server"]
+        EPW["EP Worker"]
+        EPDB[("EP PostgreSQL")]
+    end
+
+    T["Temporal Frontend\n:7233"]
+
+    C -->|"GET /api/v1/workflows/"| SW
+    C -->|"GET /api/execution-plane/v1/execution-targets"| SW
+
+    SW -->|"handled directly"| SDB
+    SW -. "[speculative] reverse-proxy\nGET /api/execution-plane/v1/..." .-> EPWS
+
+    STW -->|"POST /submit"| EPWS
+    EPWS -->|"INSERT work_items"| EPDB
+    STW -.->|"raise_complete_async\n(activity suspends)"| T
+
+    EPWS -->|"query"| EPDB
+    EPW -->|"poll / LISTEN"| EPDB
+
+    EPW -->|"option A: gRPC handle.complete()\n(port 7233, direct to Temporal)"| T
+    T -->|"activity resumed"| STW
+
+    EPW -. "option B [speculative]:\nPOST /result-callback" .-> SW
+    SW -. "handle.complete() gRPC\n(port 7233)" .-> T
+```
+
+---
+
 ## Current state (intentional shortcut)
 
 The EP worker is a separate Python package (`execution-plane/`) and runs in its
