@@ -39,7 +39,9 @@ coupling. The coupling is **bounded and explicit**:
 
 - Syntara only **writes** to `execution_plane` schema tables. It never reads
   from them for business logic.
-- The EP worker never touches Syntara's schema tables.
+- The EP worker does not depend on the `syntara` package. It has no SQLModel
+  models for Syntara's tables and no knowledge of Syntara's schema — it cannot
+  touch them even accidentally.
 - Syntara's Alembic autogenerate explicitly excludes the `execution_plane`
   schema (`migrations/env.py`), so migrations do not interfere.
 
