@@ -28,7 +28,7 @@ flowchart TD
     subgraph syn["Syntara"]
         SW["Web Server"]
         STW["Temporal Worker"]
-        T["Temporal Frontend\n:7233"]
+        T["Temporal :7233"]
     end
 
     subgraph ep["EP Worker"]
@@ -44,7 +44,7 @@ flowchart TD
     STW -.->|"raise_complete_async\n(activity suspends)"| T
 
     DB -->|"LISTEN wakes worker;\nSELECT FOR UPDATE"| EPW
-    EPW -->|"gRPC handle.complete()\n(port 7233)"| T
+    EPW -->|"gRPC handle.complete()"| T
     T -->|"activity resumed"| STW
 ```
 
@@ -68,7 +68,7 @@ flowchart TD
     subgraph syn["Syntara"]
         SW["Web Server"]
         STW["Temporal Worker"]
-        T["Temporal Frontend\n:7233"]
+        T["Temporal :7233"]
     end
 
     subgraph epservice["EP Service (future standalone)"]
@@ -79,7 +79,7 @@ flowchart TD
     C -->|"GET /api/v1/workflows/"| SW
     C -->|"GET /api/execution-plane/v1/execution-targets"| SW
 
-    SW -->|"handled directly"| SDB
+    SW -->|"SELECT syntara.workflows"| SDB
     SW -. "[speculative] reverse-proxy\nGET /api/execution-plane/v1/..." .-> EPWS
 
     STW -->|"POST /submit"| EPWS
@@ -87,10 +87,10 @@ flowchart TD
     STW -.->|"raise_complete_async\n(activity suspends)"| T
 
     EPWS -->|"query"| EPDB
-    EPW -->|"poll / LISTEN"| EPDB
+    EPWS -->|"TCP wakeup"| EPW
 
     EPW -->|"POST /result-callback"| SW
-    SW -->|"gRPC handle.complete()\n(port 7233)"| T
+    SW -->|"gRPC handle.complete()"| T
     T -->|"activity resumed"| STW
 ```
 
