@@ -101,6 +101,17 @@ Whether the submission and public endpoints live on the same service, the same
 port, or separate deployments is an open architecture decision reserved for the
 team building the standalone EP service. This document does not resolve it.
 
+**Temporal connectivity is a constraint on any standalone design.** The EP
+worker currently calls `handle.complete()` — a direct gRPC call to the Temporal
+Frontend service (port 7233) — to resume the suspended Syntara activity. This
+means the EP worker pod requires egress to Temporal regardless of how work is
+submitted to it. If a future design needs the EP worker to be fully isolated
+from Temporal (e.g. in a stricter network segment), the completion signal must
+travel back to Syntara via a callback endpoint instead: the EP worker `POST`s
+the result to a Syntara API endpoint, and Syntara calls `handle.complete()`.
+That callback URL and its auth mechanism would become part of the `POST /submit`
+request body sent by Syntara when submitting work.
+
 ---
 
 ## Current boundary crossings (exhaustive list)
