@@ -21,7 +21,7 @@ The EP router is temporarily mounted inside the Syntara web server. Work is
 submitted by writing directly to the shared database rather than calling an API.
 
 ```mermaid
-flowchart LR
+flowchart TD
     C([Client])
     DB[("Shared PostgreSQL\n(syntara + execution_plane schemas)")]
 
@@ -60,7 +60,7 @@ redirect, no public exposure of EP endpoints at all). The key point is that
 or host when EP becomes a standalone service.
 
 ```mermaid
-flowchart LR
+flowchart TD
     C([Client])
     SDB[("Syntara PostgreSQL")]
     EPDB[("EP PostgreSQL")]
