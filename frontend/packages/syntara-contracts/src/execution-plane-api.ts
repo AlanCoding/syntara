@@ -171,6 +171,8 @@ export interface components {
       claimed_at?: string | null
       /** Completed At */
       completed_at?: string | null
+      /** Signaled At */
+      signaled_at?: string | null
     }
     /**
      * WorkItemListResponse
