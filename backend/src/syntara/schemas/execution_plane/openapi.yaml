@@ -2,29 +2,28 @@
 openapi: 3.1.0
 info:
   title: Execution Plane API
-  description: Execution Plane operator endpoints — observe execution targets and
-    work items.
+  description: Execution Plane operator endpoints — observe execution targets and work items.
   version: 0.1.0
 paths:
   /api/execution-plane/v1/execution-targets:
     get:
       tags:
-      - Execution Plane
+        - Execution Plane
       summary: List execution targets
       description: Retrieve registered execution targets.
       operationId: list_execution_targets
       security:
-      - bearerAuth: []
+        - bearerAuth: []
       parameters:
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 20
-          title: Limit
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Limit
       responses:
         '200':
           description: Successful Response
@@ -44,22 +43,22 @@ paths:
   /api/execution-plane/v1/work-items:
     get:
       tags:
-      - Execution Plane
+        - Execution Plane
       summary: List work items
       description: Retrieve work items.
       operationId: list_work_items
       security:
-      - bearerAuth: []
+        - bearerAuth: []
       parameters:
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          default: 20
-          title: Limit
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Limit
       responses:
         '200':
           description: Successful Response
@@ -81,8 +80,8 @@ components:
     BackendType:
       type: string
       enum:
-      - vanilla_k8s
-      - openshell
+        - vanilla_k8s
+        - openshell
       title: BackendType
     ExecutionTarget:
       properties:
@@ -116,16 +115,16 @@ components:
           title: Created At
         last_ran_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: 'null'
           title: Last Ran At
       type: object
       required:
-      - name
-      - backend_type
-      - endpoint
-      - created_at
+        - name
+        - backend_type
+        - endpoint
+        - created_at
       title: ExecutionTarget
       description: A registered compute environment where worker pods run.
     ExecutionTargetListResponse:
@@ -137,22 +136,22 @@ components:
           title: Resources
         next:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: 'null'
           title: Next
         prev:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: 'null'
           title: Prev
         total:
           anyOf:
-          - type: integer
-          - type: 'null'
+            - type: integer
+            - type: 'null'
           title: Total
       type: object
       required:
-      - resources
+        - resources
       title: ExecutionTargetListResponse
       description: Paginated list response for ExecutionTarget.
     HTTPValidationError:
@@ -167,20 +166,20 @@ components:
     TargetStatus:
       type: string
       enum:
-      - registering
-      - validating
-      - bootstrapping
-      - active
-      - degraded
-      - failed
+        - registering
+        - validating
+        - bootstrapping
+        - active
+        - degraded
+        - failed
       title: TargetStatus
     ValidationError:
       properties:
         loc:
           items:
             anyOf:
-            - type: string
-            - type: integer
+              - type: string
+              - type: integer
           type: array
           title: Location
         msg:
@@ -196,9 +195,9 @@ components:
           title: Context
       type: object
       required:
-      - loc
-      - msg
-      - type
+        - loc
+        - msg
+        - type
       title: ValidationError
     WorkItem:
       properties:
@@ -218,9 +217,9 @@ components:
           default: pending
         execution_target_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: 'null'
           title: Execution Target Id
         payload:
           additionalProperties: true
@@ -229,9 +228,9 @@ components:
           default: {}
         result:
           anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
+            - additionalProperties: true
+              type: object
+            - type: 'null'
           title: Result
         created_at:
           type: string
@@ -239,30 +238,29 @@ components:
           title: Created At
         claimed_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: 'null'
           title: Claimed At
         completed_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: 'null'
           title: Completed At
         signaled_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: 'null'
           title: Signaled At
       type: object
       required:
-      - execution_id
-      - activity_handle
-      - created_at
+        - execution_id
+        - activity_handle
+        - created_at
       title: WorkItem
-      description: A unit of work written by the Temporal Worker and consumed by the
-        Task Executor.
+      description: A unit of work written by the Temporal Worker and consumed by the Task Executor.
     WorkItemListResponse:
       properties:
         resources:
@@ -272,33 +270,33 @@ components:
           title: Resources
         next:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: 'null'
           title: Next
         prev:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: 'null'
           title: Prev
         total:
           anyOf:
-          - type: integer
-          - type: 'null'
+            - type: integer
+            - type: 'null'
           title: Total
       type: object
       required:
-      - resources
+        - resources
       title: WorkItemListResponse
       description: Paginated list response for WorkItem.
     WorkItemStatus:
       type: string
       enum:
-      - pending
-      - claimed
-      - dispatched
-      - completed
-      - failed
-      - cancelled
+        - pending
+        - claimed
+        - dispatched
+        - completed
+        - failed
+        - cancelled
       title: WorkItemStatus
   securitySchemes:
     bearerAuth:
