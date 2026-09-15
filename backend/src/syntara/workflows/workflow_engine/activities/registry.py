@@ -35,7 +35,7 @@ from syntara.workflows.workflow_engine.activities.loop import loop
 from syntara.workflows.workflow_engine.activities.manual_trigger import manual_trigger
 from syntara.workflows.workflow_engine.activities.runtime_settings_activity import fetch_workflow_runtime_settings
 from syntara.workflows.workflow_engine.activities.scheduled_trigger import scheduled_trigger
-from syntara.workflows.workflow_engine.activities.script_activity import execute_script_activity
+from syntara.workflows.workflow_engine.activities.ep.ep_dispatch_activity import execute_script_activity
 from syntara.workflows.workflow_engine.activities.switch import switch
 from syntara.workflows.workflow_engine.activities.wait_activity import complete_wait, wait
 from syntara.workflows.workflow_engine.activities.webhook_trigger import webhook_trigger
