@@ -56,6 +56,9 @@ async def _execute_work_item(item: WorkItem, temporal_client: Client) -> None:
 
     try:
         activity_result = await execute_script(input_config, output_config)
+        # Direct gRPC call to Temporal Frontend (port 7233) — requires network
+        # egress to Temporal from the EP worker pod. See
+        # docs/execution-plane-integration.md for the callback alternative.
         await handle.complete(activity_result)
         logger.info("Work item completed successfully", work_item_id=wi_id)
 
