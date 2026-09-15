@@ -23,18 +23,17 @@ submitted by writing directly to the shared database rather than calling an API.
 ```mermaid
 flowchart LR
     C([Client])
+    DB[("Shared PostgreSQL\n(syntara + execution_plane schemas)")]
+    T["Temporal Frontend\n:7233"]
 
     subgraph syn["Syntara"]
         SW["Web Server"]
         STW["Temporal Worker"]
     end
 
-    subgraph ep["EP Worker (separate container)"]
+    subgraph ep["EP Worker"]
         EPW["Worker Process"]
     end
-
-    DB[("Shared PostgreSQL\n(syntara + execution_plane schemas)")]
-    T["Temporal Frontend\n:7233"]
 
     C -->|"GET /api/v1/workflows/"| SW
     C -->|"GET /api/execution-plane/v1/execution-targets"| SW
