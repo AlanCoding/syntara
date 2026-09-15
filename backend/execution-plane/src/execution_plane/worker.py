@@ -86,7 +86,14 @@ async def _process_item(item: WorkItem, session: AsyncSession, temporal_client: 
 
 
 async def _listen_loop(database_url: str, wakeup_event: asyncio.Event) -> None:
-    """Hold a LISTEN connection; set wakeup_event on every NOTIFY."""
+    """Hold a LISTEN connection; set wakeup_event on every NOTIFY.
+
+    Known gap: a zombie TCP connection (NAT expiry, silent load-balancer drop,
+    VM migration) will not trigger the termination listener, so the worker
+    silently falls back to POLL_INTERVAL_SECONDS cadence until the OS-level
+    TCP keepalive eventually kills the connection. Fix: periodic self-NOTIFY or
+    a LISTEN/UNLISTEN probe to detect stale connections. See AAP-92715.
+    """
     # asyncpg uses plain postgresql:// (not postgresql+asyncpg://)
     pg_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
     while True:
