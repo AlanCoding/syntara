@@ -197,26 +197,17 @@ request body sent by Syntara when submitting work.
 
 ---
 
-## Current boundary crossings (exhaustive list)
+## Current boundary crossings
 
-These are the only places where Syntara code directly touches the
-`execution_plane` schema. Each one must be replaced when EP becomes standalone.
+Each must be replaced when EP becomes standalone.
 
 | File | What it does |
 |---|---|
-| `src/syntara/workflows/workflow_engine/activities/ep/ep_dispatch_activity.py` | Writes `WorkItem` row and issues `pg_notify` |
-
-The EP router (`execution_plane/router.py`) is imported and mounted in
-`src/syntara/api/main.py`. This is a different category of coupling — it is
-the public API surface being temporarily hosted by Syntara rather than the EP
-service. That import also moves out when EP becomes standalone.
+| `src/syntara/api/main.py` | Mounts EP router — temporarily hosts EP's public API |
+| `src/syntara/workflows/workflow_engine/activities/ep/ep_dispatch_activity.py` | Writes `WorkItem` row, issues `pg_notify`, stores Temporal task token for EP worker's gRPC callback |
 
 ---
 
-## What not to add
-
-- Do not add Syntara code that **reads** from `execution_plane` schema tables.
-- Do not add Syntara code that **joins** `execution_plane` tables with Syntara
-  tables in a single query.
-- Do not add new `execution_plane` schema writes from Syntara without updating
-  this document and the boundary-crossing comment table above.
+> [!CAUTION]
+> Do not add Syntara code that **reads** from or **joins** `execution_plane` schema tables.
+> Do not add new `execution_plane` schema writes from Syntara without updating this document.

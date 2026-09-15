@@ -255,10 +255,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.ep:
-        app = build_ep_spec_app()
-    else:
-        app = build_spec_app(include_internal=not args.public)
+    app = build_ep_spec_app() if args.ep else build_spec_app(include_internal=not args.public)
     spec = app.openapi()
     apply_rfc9457_media_types(spec)
     _inject_permission_metadata(app, spec)
