@@ -19,12 +19,11 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from syntara.core.config.base import get_settings
+from syntara.workflows.workflow_engine.activities.common import HEARTBEAT_STOP_MONITOR
 from syntara.workflows.workflow_engine.models.workflow_definition import (
     ActivityName,
     ScriptExecutorParameters,
 )
-
-from ..common import HEARTBEAT_STOP_MONITOR
 
 
 async def _dispatch_to_te(
