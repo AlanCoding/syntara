@@ -24,7 +24,7 @@ from syntara.workflows.workflow_engine.models.workflow_definition import (
     ScriptExecutorParameters,
 )
 
-from .common import HEARTBEAT_STOP_MONITOR
+from ..common import HEARTBEAT_STOP_MONITOR
 
 
 async def _dispatch_to_te(
