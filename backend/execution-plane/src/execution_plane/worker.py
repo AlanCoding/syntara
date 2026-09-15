@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from temporalio.client import Client
 from temporalio.exceptions import ApplicationError
-from temporalio.service import TLSConfig
+from temporalio.service import RPCError, RPCStatusCode, TLSConfig
 
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
 from execution_plane.script_executor import ScriptExecutionError, execute_script
@@ -46,46 +46,102 @@ async def _claim_pending_items(session: AsyncSession) -> list[WorkItem]:
     return items
 
 
-async def _execute_work_item(item: WorkItem, temporal_client: Client) -> None:
-    """Run the script from the work item payload and complete the Temporal activity."""
+async def _signal_temporal(item: WorkItem, session: AsyncSession, temporal_client: Client) -> None:
+    """Call handle.complete() or handle.fail(), then set signaled_at.
+
+    If Temporal returns NOT_FOUND the token was already consumed — the signal
+    was delivered on a previous attempt. We still mark signaled_at so the
+    recovery pass stops retrying this item.
+
+    Any other RPC error is re-raised; signaled_at stays NULL so the startup
+    recovery pass will retry on next boot.
+    """
     wi_id = str(item.id)
-    input_config: dict = item.payload.get("input_config", {})
-    output_config: dict | None = item.payload.get("output_config")
     task_token = base64.b64decode(item.activity_handle)
     handle = temporal_client.get_async_activity_handle(task_token=task_token)
 
     try:
-        activity_result = await execute_script(input_config, output_config)
-        # Direct gRPC call to Temporal Frontend (port 7233) — requires network
-        # egress to Temporal from the EP worker pod. See
-        # docs/execution-plane-integration.md for the callback alternative.
-        await handle.complete(activity_result)
-        logger.info("Work item completed successfully", work_item_id=wi_id)
+        if item.status == WorkItemStatus.COMPLETED:
+            await handle.complete(item.result or {})
+        else:
+            result = item.result or {}
+            error_msg = result.get("error", "Script execution failed")
+            error_type = result.get("error_type", "ScriptExecutionError")
+            await handle.fail(ApplicationError(error_msg, type=error_type, non_retryable=True))
+    except RPCError as e:
+        if e.status == RPCStatusCode.NOT_FOUND:
+            logger.info("Temporal activity already completed, marking as signaled", work_item_id=wi_id)
+        else:
+            logger.warning(
+                "Failed to signal Temporal, will retry on next recovery pass",
+                work_item_id=wi_id,
+                error=str(e),
+            )
+            return
 
-    except ScriptExecutionError as e:
-        logger.warning("Script execution failed", work_item_id=wi_id, error=str(e))
-        await handle.fail(ApplicationError(str(e), type="ScriptExecutionError", non_retryable=True))
-        raise
-
-    except Exception as e:
-        logger.exception("Unexpected error processing work item", work_item_id=wi_id, error=str(e))
-        await handle.fail(ApplicationError(str(e), type=type(e).__name__, non_retryable=True))
-        raise
+    item.signaled_at = datetime.now(UTC)
+    await session.commit()
+    logger.info("Temporal signal delivered", work_item_id=wi_id, status=item.status)
 
 
 async def _process_item(item: WorkItem, session: AsyncSession, temporal_client: Client) -> None:
-    """Process one work item: execute, then mark completed or failed."""
+    """Process one work item: execute script, persist result, then signal Temporal."""
     wi_id = str(item.id)
+    input_config: dict = item.payload.get("input_config", {})
+    output_config: dict | None = item.payload.get("output_config")
+
+    # Step 1: Run the script.
     try:
-        await _execute_work_item(item, temporal_client)
+        activity_result = await execute_script(input_config, output_config)
+        item.result = activity_result
         item.status = WorkItemStatus.COMPLETED
-        item.completed_at = datetime.now(UTC)
-    except Exception:  # noqa: BLE001
+        logger.info("Script executed successfully", work_item_id=wi_id)
+    except ScriptExecutionError as e:
+        item.result = {"error": str(e), "error_type": "ScriptExecutionError"}
         item.status = WorkItemStatus.FAILED
-        item.completed_at = datetime.now(UTC)
-        logger.warning("Work item failed", work_item_id=wi_id)
-    finally:
-        await session.commit()
+        logger.warning("Script execution failed", work_item_id=wi_id, error=str(e))
+    except Exception as e:
+        item.result = {"error": str(e), "error_type": type(e).__name__}
+        item.status = WorkItemStatus.FAILED
+        logger.exception("Unexpected error processing work item", work_item_id=wi_id)
+
+    item.completed_at = datetime.now(UTC)
+
+    # Step 2: Persist result before signaling — if the gRPC call is lost, the
+    # startup recovery pass can retry using the result already in the DB.
+    await session.commit()
+
+    # Step 3: Signal Temporal. Sets signaled_at on success.
+    await _signal_temporal(item, session, temporal_client)
+
+
+async def _recover_undelivered(
+    session_factory: async_sessionmaker[AsyncSession],
+    temporal_client: Client,
+) -> None:
+    """Retry Temporal signals for items that completed but were never confirmed delivered.
+
+    Runs once at startup. Bounded query: only items in a terminal state with a
+    NULL signaled_at — items that finished between a crash and the previous
+    graceful shutdown.
+    """
+    async with session_factory() as session:
+        result = await session.execute(
+            select(WorkItem)
+            .where(WorkItem.status.in_([WorkItemStatus.COMPLETED, WorkItemStatus.FAILED]))
+            .where(WorkItem.signaled_at.is_(None))
+        )
+        items = list(result.scalars().all())
+
+    if not items:
+        return
+
+    logger.info("Recovering undelivered Temporal signals", count=len(items))
+    for item in items:
+        async with session_factory() as item_session:
+            refreshed = await item_session.get(WorkItem, item.id)
+            if refreshed:
+                await _signal_temporal(refreshed, item_session, temporal_client)
 
 
 async def _listen_loop(database_url: str, wakeup_event: asyncio.Event) -> None:
@@ -180,13 +236,13 @@ async def _run() -> None:
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     temporal_client = await _create_temporal_client()
 
+    await _recover_undelivered(session_factory, temporal_client)
+
     wakeup_event = asyncio.Event()
     try:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(_listen_loop(database_url, wakeup_event), name="ep-listener")
-            tg.create_task(
-                _poll_loop(session_factory, temporal_client, wakeup_event), name="ep-poll"
-            )
+            tg.create_task(_poll_loop(session_factory, temporal_client, wakeup_event), name="ep-poll")
     finally:
         await engine.dispose()
 
