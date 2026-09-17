@@ -16,7 +16,7 @@ from syntara.core.syntara_router import SyntaraRouter
 
 logger = structlog.stdlib.get_logger(__name__)
 
-router = SyntaraRouter(prefix="/api/execution-plane/v1", tags=["Execution Plane"])
+router = SyntaraRouter(prefix="/api/execution_plane/v1", tags=["Execution Plane"])
 
 _perm_et_read = PermissionChecker("execution_target", "read")
 _perm_wi_read = PermissionChecker("work_item", "read")
@@ -45,15 +45,17 @@ class WorkItemListResponse(BaseModel):
 
 
 def get_execution_target_registry(db: Annotated[AsyncSession, Depends(get_db)]) -> ExecutionTargetRegistry:
+    """Build the execution target registry for the current request."""
     return ExecutionTargetRegistry(db)
 
 
 def get_work_item_registry(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkItemRegistry:
+    """Build the work item registry for the current request."""
     return WorkItemRegistry(db)
 
 
 @router.get(
-    "/execution-targets",
+    "/execution_targets",
     operation_id="list_execution_targets",
     summary="List execution targets",
     description="Retrieve registered execution targets.",
@@ -63,13 +65,14 @@ async def list_execution_targets(
     registry: Annotated[ExecutionTargetRegistry, Depends(get_execution_target_registry)],
     limit: int = Query(default=20, ge=1, le=100),
 ) -> ExecutionTargetListResponse:
+    """List registered execution targets."""
     items = await registry.list(limit)
     logger.info("Listed execution targets", count=len(items))
     return ExecutionTargetListResponse(resources=items)
 
 
 @router.get(
-    "/work-items",
+    "/work_items",
     operation_id="list_work_items",
     summary="List work items",
     description="Retrieve work items.",
@@ -79,6 +82,7 @@ async def list_work_items(
     registry: Annotated[WorkItemRegistry, Depends(get_work_item_registry)],
     limit: int = Query(default=20, ge=1, le=100),
 ) -> WorkItemListResponse:
+    """List dispatched work items."""
     items = await registry.list(limit)
     logger.info("Listed work items", count=len(items))
     return WorkItemListResponse(resources=items)
