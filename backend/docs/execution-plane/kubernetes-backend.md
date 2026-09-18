@@ -124,32 +124,6 @@ POST /apis/apps/v1/namespaces/{exec-ns}/deployments
 The Target's status transitions: `BOOTSTRAPPING` → `ACTIVE` when `readyReplicas` reaches
 the configured minimum.
 
-**Selecting a Target with available capacity:**
-
-`ExecutionTarget` carries two integer fields: `pool_size` (configured maximum concurrent
-jobs) and `current_jobs` (live count). When a WorkItem arrives with an ordered list of
-viable Target IDs (from affinity/profile matching), EP selects the first Target with
-headroom in a single atomic Postgres query:
-
-```sql
-SELECT et.*
-FROM execution_targets et
-WHERE et.id = ANY($1::uuid[])           -- ordered list of viable Target IDs
-  AND et.current_jobs < et.pool_size    -- has capacity
-ORDER BY array_position($1::uuid[], et.id)  -- preserve caller's priority order
-LIMIT 1
-FOR UPDATE SKIP LOCKED
-```
-
-`SKIP LOCKED` skips any Target row currently locked by another EP worker transaction,
-avoiding blocking and deadlocks. The transaction that wins the row increments
-`current_jobs` and sets `work_item.execution_target_id` before committing. On WorkItem
-completion or failure, `current_jobs` is decremented.
-
-For cold-start Targets, `pool_size` is NULL (unlimited). The same query works —
-`current_jobs < pool_size` is treated as always true, and `current_jobs` is still tracked
-for observability.
-
 **Dispatching work to a pod:**
 
 Once a Target is selected, EP picks any running pod in that Target's Deployment (via K8s
