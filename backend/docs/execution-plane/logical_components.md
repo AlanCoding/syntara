@@ -1,9 +1,7 @@
 # Execution Plane: Logical Components
 
 This is an echo of the component decomposition from the ANSTRAT-1803 System Design Plan:
-[ansible/handbook#1664](https://github.com/ansible/handbook/pull/1664). Refer to that
-document for the authoritative component definitions, acceptance criteria, and
-requirements.
+[ansible/handbook#1664](https://github.com/ansible/handbook/pull/1664).
 
 ---
 
@@ -64,53 +62,57 @@ graph LR
 
 ## Logical units
 
-- **[Work Executor](work-executor.md)** — In: work submission from consumer, including a
-  caller-generated UUID and isolation policy. Out: work item persisted to Work Store. The
-  ID is caller-owned — the consumer generates it before submitting.
+- **[Work Executor](work-executor.md)**
+  - In: work submission from consumer, including a caller-generated UUID and isolation policy
+  - Out: `WorkItem` persisted to [`WorkStore`](work-store.md). The ID is caller-owned — the consumer generates it before submitting.
 
-- **[Work Store](work-store.md)** — In: work items (Executor); results and completion
-  events (Worker Manager). Out: claimable queue (Scheduler); completion events
-  (Completion Notifier).
+- **[Work Store](work-store.md)**
+  - In: `WorkItem`s from Work Executor; results and completion events from Worker Manager
+  - Out: claimable `WorkItem`s to Work Scheduler; completion events to Completion Notifier
 
-- **Work Scheduler** — In: claimed `WorkItem` from [`WorkStore`](work-store.md); `ReconcileResult` from `ExecutionTarget` Reconciler. Out: dispatch to Worker Manager; demand signal to Pool Autoscaler.
+- **Work Scheduler**
+  - In: claimed `WorkItem` from [`WorkStore`](work-store.md); `ReconcileResult` from `ExecutionTarget` Reconciler
+  - Out: dispatch to Worker Manager; demand signal to Pool Autoscaler
 
-- **ExecutionTarget Reconciler** — In: WorkRequirements (selectors, isolation policy) from
-  Scheduler; pool snapshots + health from ExecutionTarget Store. Out: ranked ReconcileResult
-  (selected pool, ineligible pools with reasons). Pure query — no writes, no side
-  effects.
+- **ExecutionTarget Reconciler**
+  - In: `WorkRequirements` (selectors, isolation policy) from Scheduler; pool snapshots + health from `ExecutionTargetStore`
+  - Out: ranked `ExecutionTarget`s (`ReconcileResult`). Pure query — no writes, no side effects.
 
-- **ExecutionTarget Store** — In: pool registrations from Registration Provider; health and
-  capacity updates from Resource Monitor. Out: pool snapshots to ExecutionTarget Reconciler.
-  Currently the `ExecutionTarget` table in Postgres.
+- **ExecutionTarget Store**
+  - In: pool registrations from Registration Provider; health and capacity updates from Resource Monitor
+  - Out: pool snapshots to `ExecutionTarget` Reconciler. Currently the `ExecutionTarget` table in Postgres.
 
-- **Resource Monitor** — In: health probes from Worker Pool. Out: writes health and
-  capacity back to ExecutionTarget Store. No state of its own.
+- **Resource Monitor**
+  - In: health probes from Worker Pool
+  - Out: health and capacity written to `ExecutionTargetStore`. No state of its own.
 
-- **Pool Autoscaler** — In: demand signal from Scheduler. Out: replica count adjustment
-  to Worker Pool.
+- **Pool Autoscaler**
+  - In: demand signal from Work Scheduler or Worker Manager
+  - Out: replica count adjustment to Worker Pool
 
-- **[Worker Manager](worker-manager.md)** — In: `WorkItem` + `ExecutionTarget` from Scheduler.
-  Out: result and completion event written to [`WorkStore`](work-store.md); bounce-back state written to
-  `ExecutionTargetStore` on K8s rejection. Obtains an `ExecutionTarget`, injects credentials, runs the work,
-  collects output.
+- **[Worker Manager](worker-manager.md)**
+  - In: `WorkItem` + `ExecutionTarget` from Scheduler
+  - Out: result and completion event written to [`WorkStore`](work-store.md); bounce-back state written to `ExecutionTargetStore` on K8s rejection. Obtains an `ExecutionTarget`, injects credentials, runs the work, collects output.
 
-- **Credential Provider** — In: credential scope (from isolation policy on the work item
-  or the ExecutionTarget) + request from Worker Manager. Out: credentials injected into
-  the worker for the duration of execution only.
+- **Credential Provider**
+  - In: credential scope (from isolation policy on the `WorkItem` or the `ExecutionTarget`) + request from Worker Manager
+  - Out: credentials injected into the worker for the duration of execution only
 
-- **Worker Pool** — In: work dispatched by Worker Manager; scale adjustments from
-  Autoscaler; bootstrap from Cluster Bootstrapper. Out: execution results; health data
-  probed by Resource Monitor. K8s backend: see [kubernetes-backend.md](kubernetes-backend.md).
+- **Worker Pool**
+  - In: work dispatched by Worker Manager; scale adjustments from Pool Autoscaler; bootstrap from Cluster Bootstrapper
+  - Out: execution results; health data probed by Resource Monitor. K8s backend: see [kubernetes-backend.md](kubernetes-backend.md).
 
-- **Completion Notifier** — In: completion event from Work Store. Out: async notification
-  to consumer (e.g. Temporal signal callback).
+- **Completion Notifier**
+  - In: completion event from [`WorkStore`](work-store.md)
+  - Out: async notification to consumer (e.g. Temporal signal callback)
 
-- **Registration Provider** — In: administrator registration action. Out: pool record
-  written to ExecutionTarget Store; bootstrap delegated to Cluster Bootstrapper.
+- **Registration Provider**
+  - In: administrator registration action
+  - Out: pool record written to `ExecutionTargetStore`; bootstrap delegated to Cluster Bootstrapper
 
-- **Cluster Bootstrapper** — In: registration from Registration Provider. Out:
-  provisioned K8s resources (namespace, ServiceAccount, RBAC) that become the Worker
-  Pool.
+- **Cluster Bootstrapper**
+  - In: registration from Registration Provider
+  - Out: provisioned K8s resources (namespace, ServiceAccount, RBAC) that become the Worker Pool
 
 ---
 
