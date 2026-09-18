@@ -39,7 +39,13 @@ async def _process_item(item: WorkItem, store: WorkStore, completion_callback: C
     except ScriptExecutionError as e:
         item = await store.set_result(
             item.id,
-            {"error": str(e), "error_type": "ScriptExecutionError"},
+            {
+                "error": str(e),
+                "error_type": "ScriptExecutionError",
+                "exit_code": e.exit_code,
+                "stdout": e.stdout,
+                "stderr": e.stderr,
+            },
             WorkItemStatus.FAILED,
         )
         logger.warning("Script execution failed", work_item_id=wi_id, error=str(e))
