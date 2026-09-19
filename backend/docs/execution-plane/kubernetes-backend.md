@@ -110,38 +110,47 @@ Pod template fields populated from `WorkItem.payload`:
 ### Warm pool
 
 A warm pool is a pre-provisioned set of idle pods ready to accept work with low latency.
-Each warm pod runs a purpose-built entrypoint: a forever loop that reads a work unit from
-stdin, executes it, writes the result to stdout, then loops back to wait for the next unit.
+Each warm pod runs a purpose-built entrypoint that reads one work unit from stdin, executes
+it, writes the result to stdout, and then **exits cleanly**. It does not loop.
 
 **Provisioning (at Target creation / restart):**
 
 ```
 POST /apis/apps/v1/namespaces/{exec-ns}/deployments
          → create Deployment with fixed image, env, mounts (Target-level, immutable)
-           replicas = pool size, restartPolicy = Always, stdin: true
+           spec.replicas = pool_size
+           spec.template.spec.restartPolicy: Always   (Deployment default)
+           spec.template.spec.containers[0].stdin: true
 ```
+
+`restartPolicy: Always` means Kubernetes restarts the container whenever it exits — whether
+after completing work or on failure. On each restart, the container gets a fresh writable
+layer from the image; any state the previous run wrote to the container filesystem is gone.
+This is the isolation guarantee. Note: `emptyDir` volumes are scoped to the Pod (not the
+container) and survive restarts — avoid writing cross-job state there.
 
 The Target's status transitions: `BOOTSTRAPPING` → `ACTIVE` when `readyReplicas` reaches
 the configured minimum.
 
 **Dispatching work to a pod:**
 
-Once a Target is selected, EP picks any running pod in that Target's Deployment (via K8s
-list) and attaches:
+EP picks any running pod from the Deployment that is not already claimed (tracked in EP
+state), and attaches to its container:
 
 ```
 POST /api/v1/namespaces/{exec-ns}/pods/{name}/attach?stdin=true&stdout=true&stderr=true
-         → streaming connection to PID 1's stdin/stdout
-         → write work unit as payload, read result back on stdout
+         → streaming connection to the container's stdin/stdout
+         → write work unit as payload; read result back on stdout
 ```
 
-K8s allows only one attach session per container at a time. This enforces isolation:
-a pod is either idle (no active attach) or busy (attached, running one job).
+K8s allows only one `attach` session per container at a time, enforcing that a pod is
+either idle (no active attach) or busy (attached, running one job).
 
 **After work completes:**
 
-EP detaches. The pod loops back to its idle state, ready for the next attach. K8s (via the
-Deployment) handles replacement if the pod crashes.
+The container exits. Kubernetes restarts it automatically (via `restartPolicy: Always`),
+bringing it back to an idle state with a clean filesystem. The Deployment's `readyReplicas`
+is maintained at `spec.replicas` — no EP-side pool management required.
 
 **Deprovisioning (Target delete / deactivate):**
 
@@ -149,7 +158,7 @@ Deployment) handles replacement if the pod crashes.
 DELETE /apis/apps/v1/namespaces/{exec-ns}/deployments/{name}
 ```
 
-Drain in-flight work before deleting (transition to `unavailable`, wait for active pods
+Drain in-flight work before deleting (transition to `UNAVAILABLE`, wait for active pods
 to complete or time out, then delete).
 
 ---
@@ -207,7 +216,7 @@ Priority and ordering between targets is part of the matching problem documented
 | Pod eviction during execution | Watch returns `Failed` with reason `Evicted` | Retry WorkItem (up to retry limit); prefer a different node via anti-affinity |
 | Node unreachable / kubelet timeout | Pod stays in `Running` past deadline | Kill pod, mark WorkItem failed; operator-level node health drives longer-term response |
 | EP worker crash mid-dispatch (cold-start) | Pod orphaned with EP's claim label | Startup sweep: find pods with `ep.execution/work-item-id` labels and no active WorkItem; delete orphaned pods |
-| EP worker crash mid-dispatch (warm-pool) | Attach dropped before or during payload write | Pod's stdin loop has a timeout: if a payload does not arrive within N seconds of an attach, the loop emits a status message on stdout ("received attach for WorkItem XYZ, payload not received") and resets. EP reads this and knows the WorkItem was not started — it can be re-submitted to another pod. `current_jobs` is decremented, WorkItem status returns to dispatchable. |
+| EP worker crash mid-dispatch (warm-pool) | Attach dropped before or during payload write | The container's stdin read has a timeout. If the full payload does not arrive within N seconds of an attach, the container exits (without running any job). Kubernetes restarts it immediately (`restartPolicy: Always`), returning the pod to an idle, claimable state. The EP side detects the failed attach and calls `WorkStore.requeue_on_placement_failure()`. |
 | Warm pool Deployment degraded | `readyReplicas < minReplicas` | Target transitions to `DEGRADED`; cold-start fallback if available |
 | Execution namespace deleted externally | API calls return 404 | EP reconciler (or AO operator) re-provisions the namespace and RBAC |
 
