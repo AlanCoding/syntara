@@ -11,7 +11,6 @@ import uuid
 from typing import Any
 
 from execution_plane.work_store import WorkStore
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -40,24 +39,18 @@ async def _dispatch_to_te(
     correlation_id_str = activity.info().workflow_id
 
     settings = get_settings()
-    engine = create_async_engine(settings.database_url, poolclass=NullPool)
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     try:
         work_correlation_id = uuid.UUID(correlation_id_str) if correlation_id_str else uuid.uuid4()
     except ValueError:
         work_correlation_id = uuid.uuid4()
 
-    try:
-        async with session_factory() as session:
-            store = WorkStore(session)
-            work_item = await store.dispatch(
-                activity_handle=task_token_b64,
-                work_correlation_id=work_correlation_id,
-                payload={"input_config": input_config, "output_config": output_config},
-            )
-    finally:
-        await engine.dispose()
+    async with WorkStore(settings.database_url.render_as_string(hide_password=False), poolclass=NullPool) as store:
+        work_item = await store.dispatch(
+            activity_handle=task_token_b64,
+            work_correlation_id=work_correlation_id,
+            payload={"input_config": input_config, "output_config": output_config},
+        )
     activity.logger.info("Dispatched work item to TE work_item_id=%s", work_item.id)
 
 
