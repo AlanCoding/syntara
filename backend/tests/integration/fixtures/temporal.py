@@ -12,7 +12,6 @@ import pytest_asyncio
 import structlog
 from execution_plane.temporal_client import send_temporal_callback
 from execution_plane.worker import run_worker
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -95,12 +94,10 @@ async def temporal_env(
     """
     database_url = test_db_engine.url
     monkeypatch.setenv("APP_DATABASE_URL", database_url.render_as_string(hide_password=False))
-    session_factory = async_sessionmaker(test_db_engine, class_=AsyncSession, expire_on_commit=False)
     callback = partial(send_temporal_callback, client=_temporal_server.client)
     worker_task = asyncio.create_task(
         run_worker(
-            session_factory,
-            database_url.set(drivername="postgresql").render_as_string(hide_password=False),
+            database_url.render_as_string(hide_password=False),
             callback,
         ),
         name="test-execution-plane",

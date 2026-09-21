@@ -9,25 +9,44 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any, Self
 
 from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import col
-
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
 
 _NOTIFY_CHANNEL = "execution_plane_work_items"
 
 
-class WorkStore:
-    """Persist work item lifecycle transitions and callback delivery state."""
+class WorkItemNotFoundError(LookupError):
+    """Raised when a lifecycle transition targets an unknown work item."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        """Use the caller-owned async database session."""
-        self._session = session
+    def __init__(self, item_id: uuid.UUID) -> None:
+        """Identify the missing work item."""
+        super().__init__(f"Work item {item_id} does not exist")
+
+
+class WorkStore:
+    """Persist work item lifecycle transitions and own database resources."""
+
+    def __init__(self, database_url: str) -> None:
+        """Create a store backed by the supplied database URL."""
+        self._engine = create_async_engine(database_url)
+        self._session_factory = async_sessionmaker(self._engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def __aenter__(self) -> Self:
+        """Return this store for use as an async context manager."""
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        """Dispose the store's engine."""
+        await self.close()
+
+    async def close(self) -> None:
+        """Dispose all pooled database connections owned by this store."""
+        await self._engine.dispose()
 
     async def dispatch(
         self,
@@ -44,55 +63,83 @@ class WorkStore:
             payload=payload,
             created_at=datetime.now(UTC),
         )
-        self._session.add(item)
-        # pg_notify is transactional — delivered only after this commit.
-        await self._session.execute(text(f"SELECT pg_notify('{_NOTIFY_CHANNEL}', '')"))
-        await self._session.commit()
+        async with self._session_factory() as session:
+            try:
+                session.add(item)
+                # pg_notify is transactional — delivered only after this commit.
+                await session.execute(text(f"SELECT pg_notify('{_NOTIFY_CHANNEL}', '')"))
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
         return item
 
     async def claim_one(self) -> WorkItem | None:
         """Claim the oldest PENDING item for this worker, or return None."""
-        result = await self._session.execute(
-            select(WorkItem)
-            .where(col(WorkItem.status) == WorkItemStatus.PENDING)
-            .order_by(col(WorkItem.created_at))
-            .limit(1)
-            .with_for_update(skip_locked=True)
-        )
-        item = result.scalars().first()
-        if item is None:
-            return None
-        item.status = WorkItemStatus.CLAIMED
-        item.claimed_at = datetime.now(UTC)
-        await self._session.commit()
-        return item
+        async with self._session_factory() as session:
+            try:
+                result = await session.execute(
+                    select(WorkItem)
+                    .where(col(WorkItem.status) == WorkItemStatus.PENDING)
+                    .order_by(col(WorkItem.created_at))
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
+                )
+                item = result.scalars().first()
+                if item is None:
+                    return None
+                item.status = WorkItemStatus.CLAIMED
+                item.claimed_at = datetime.now(UTC)
+                await session.commit()
+                return item
+            except Exception:
+                await session.rollback()
+                raise
 
     async def set_result(
         self,
-        item: WorkItem,
+        item_id: uuid.UUID,
         result: dict[str, Any],
         status: WorkItemStatus,
-    ) -> None:
+    ) -> WorkItem:
         """Persist the terminal result before signalling Temporal.
 
         Committing here means the startup recovery pass can retry the signal
         if the process crashes between this commit and mark_signal_delivered.
         """
-        item.result = result
-        item.status = status
-        item.completed_at = datetime.now(UTC)
-        await self._session.commit()
+        async with self._session_factory() as session:
+            try:
+                item = await session.get(WorkItem, item_id)
+                if item is None:
+                    raise WorkItemNotFoundError(item_id)  # noqa: TRY301
+                item.result = result
+                item.status = status
+                item.completed_at = datetime.now(UTC)
+                await session.commit()
+                return item
+            except Exception:
+                await session.rollback()
+                raise
 
-    async def mark_signal_delivered(self, item: WorkItem) -> None:
+    async def mark_signal_delivered(self, item_id: uuid.UUID) -> None:
         """Record that the Temporal async-completion callback was confirmed sent."""
-        item.signaled_at = datetime.now(UTC)
-        await self._session.commit()
+        async with self._session_factory() as session:
+            try:
+                item = await session.get(WorkItem, item_id)
+                if item is None:
+                    raise WorkItemNotFoundError(item_id)  # noqa: TRY301
+                item.signaled_at = datetime.now(UTC)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     async def find_undelivered(self) -> list[WorkItem]:
         """Return terminal items whose Temporal signal was never confirmed."""
-        result = await self._session.execute(
-            select(WorkItem)
-            .where(col(WorkItem.status).in_([WorkItemStatus.COMPLETED, WorkItemStatus.FAILED]))
-            .where(col(WorkItem.signaled_at).is_(None))
-        )
-        return list(result.scalars().all())
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(WorkItem)
+                .where(col(WorkItem.status).in_([WorkItemStatus.COMPLETED, WorkItemStatus.FAILED]))
+                .where(col(WorkItem.signaled_at).is_(None))
+            )
+            return list(result.scalars().all())
