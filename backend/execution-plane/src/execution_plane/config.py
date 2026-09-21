@@ -6,6 +6,12 @@ from functools import lru_cache
 
 from pydantic import AliasChoices, Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+
+
+def to_asyncpg_url(database_url: str) -> str:
+    """Return a PostgreSQL URL without a SQLAlchemy DBAPI driver suffix."""
+    return make_url(database_url).set(drivername="postgresql").render_as_string(hide_password=False)
 
 
 class EPSettings(BaseSettings):
@@ -22,7 +28,7 @@ class EPSettings(BaseSettings):
     @property
     def database_url_asyncpg(self) -> str:
         """asyncpg-compatible URL (strips the +asyncpg SQLAlchemy driver prefix)."""
-        return self.database_url.replace("postgresql+asyncpg://", "postgresql://")
+        return to_asyncpg_url(self.database_url)
 
 
 @lru_cache

@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import col
 
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
+
+if TYPE_CHECKING:
+    from sqlalchemy.pool import Pool
 
 _NOTIFY_CHANNEL = "execution_plane_work_items"
 
@@ -31,9 +34,12 @@ class WorkItemNotFoundError(LookupError):
 class WorkStore:
     """Persist work item lifecycle transitions and own database resources."""
 
-    def __init__(self, database_url: str) -> None:
-        """Create a store backed by the supplied database URL."""
-        self._engine = create_async_engine(database_url)
+    def __init__(self, database_url: str, poolclass: type[Pool] | None = None) -> None:
+        """Create a store backed by the supplied database URL and optional pool class."""
+        if poolclass is None:
+            self._engine = create_async_engine(database_url)
+        else:
+            self._engine = create_async_engine(database_url, poolclass=poolclass)
         self._session_factory = async_sessionmaker(self._engine, class_=AsyncSession, expire_on_commit=False)
 
     async def __aenter__(self) -> Self:

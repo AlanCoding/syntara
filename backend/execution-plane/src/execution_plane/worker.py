@@ -11,7 +11,7 @@ from typing import Any
 import asyncpg
 import structlog
 
-from execution_plane.config import get_ep_settings
+from execution_plane.config import get_ep_settings, to_asyncpg_url
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
 from execution_plane.script_executor import ScriptExecutionError, execute_script
 from execution_plane.temporal_client import send_temporal_callback
@@ -138,7 +138,7 @@ async def run_worker(
         wakeup_event = asyncio.Event()
         async with asyncio.TaskGroup() as tg:
             tg.create_task(
-                _listen_loop(database_url.replace("postgresql+asyncpg://", "postgresql://"), wakeup_event),
+                _listen_loop(to_asyncpg_url(database_url), wakeup_event),
                 name="ep-listener",
             )
             tg.create_task(_poll_loop(store, wakeup_event, completion_callback), name="ep-poll")

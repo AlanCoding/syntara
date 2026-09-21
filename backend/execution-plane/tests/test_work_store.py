@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
 from execution_plane.work_store import WorkStore
+from sqlalchemy.pool import NullPool
 
 
 class _Session:
@@ -86,4 +87,13 @@ async def test_set_result_reloads_item_by_id() -> None:
     assert item.status == WorkItemStatus.COMPLETED
     assert item.result == {"output": "ok"}
     assert session.commits == 1
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_accepts_engine_options() -> None:
+    """Store callers can select a pool appropriate for their lifecycle."""
+    store = WorkStore("postgresql+asyncpg://localhost/syntara", poolclass=NullPool)
+
+    assert isinstance(store._engine.pool, NullPool)
     await store.close()

@@ -11,6 +11,7 @@ import uuid
 from typing import Any
 
 from execution_plane.work_store import WorkStore
+from sqlalchemy.pool import NullPool
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -44,7 +45,7 @@ async def _dispatch_to_te(
     except ValueError:
         work_correlation_id = uuid.uuid4()
 
-    async with WorkStore(settings.database_url.render_as_string(hide_password=False)) as store:
+    async with WorkStore(settings.database_url.render_as_string(hide_password=False), poolclass=NullPool) as store:
         work_item = await store.dispatch(
             activity_handle=task_token_b64,
             work_correlation_id=work_correlation_id,
