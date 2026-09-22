@@ -15,28 +15,30 @@ See [logical_components.md](logical_components.md) for how it fits into the logi
 
 ## Interface
 
-Defined as a Protocol in `execution_plane/worker_manager/base.py`. `dispatch` receives a `WorkItem` and an ordered list of candidate `ExecutionTarget`
-snapshots (ranked by the `ExecutionTarget` Reconciler). These are static data — not live
-model objects — carrying the target's configuration at the time of scheduling:
+Defined as a Protocol in `execution_plane/worker_manager/base.py`. A `WorkerManager`
+instance is created by the Work Scheduler for a specific `ExecutionTarget` — it is
+configured at instantiation with that Target's data (static snapshot, not a live model
+object). `dispatch` then only receives the `WorkItem`:
 
 ```python
 class WorkerManager(Protocol):
-    async def dispatch(self, work_item: WorkItem, targets: list[ExecutionTargetData]) -> dict[str, Any]:
-        """Submit work_item to the first viable target and return the terminal result."""
+    async def dispatch(self, work_item: WorkItem) -> dict[str, Any]:
+        """Submit work_item to this manager's ExecutionTarget and return the terminal result."""
 ```
 
-`dispatch` works through the list from the front:
+The Work Scheduler owns the iteration: it retrieves the ranked list of candidate
+`ExecutionTarget`s from the `ExecutionTarget` Reconciler, instantiates a `WorkerManager`
+for each one in order, and calls `dispatch`. If `dispatch` fails — capacity exhausted,
+infrastructure rejection, or any other error — the Scheduler moves to the next candidate.
+If all candidates fail, the `WorkItem` remains `PENDING`.
 
-1. Consult the `ExecutionTargetStore` for proactive capacity on the first `ExecutionTarget`.
-   - **Cold target** — no capacity claim required; proceed directly to submission.
-   - **Warm target** — attempt to claim the expected capacity spend in the
-     `ExecutionTargetStore`. If the Target is at capacity, move to the next candidate.
-2. Bind `execution_target_id` on the `WorkItem` and submit to the cluster's API.
-3. On infrastructure rejection, call `WorkStore.requeue_on_placement_failure()` and stop
-   — the `WorkItem` re-enters `PENDING` with a hold-off (see Placement failure backoff).
+The `dispatch` signature may grow to accept an `execution_environment` parameter to carry
+workload-specific image and mount configuration without a separate configure step; this is
+not yet decided.
 
 Each backend type (`vanilla_k8s`, `openshell`, …) provides a concrete implementation
-that knows how to speak the API of its cluster type.
+that knows how to speak the API of its cluster type. The `backend_type` field on the
+`ExecutionTarget` determines which implementation the Scheduler instantiates.
 
 ---
 
@@ -109,12 +111,17 @@ to a warm pod or create a cold-start pod). If that call fails:
    any worker will claim it again.
 
 The `execution_target_id` link is also relevant after a process restart. A `WorkItem`
-found in `CLAIMED` or `RUNNING` status on startup was being handled by a known Target —
-the EP could query the K8s API for a pod associated with that work ID and, if still
-running, skip re-submission and go straight to result collection. Whether to attempt
-recovery or fail the item outright is speculative at this point; the exact behaviour
-depends on product preference and will only be clear once the full engineering
-constraints are known.
+found in `CLAIMED` or `RUNNING` status on startup was being handled by a known Target.
+Reattaching to the running pod is not viable — EP will have lost the stdout stream, so
+output collected so far is gone. The practical MVP approach is to re-schedule: mark the
+`WorkItem` back to `PENDING` and let the Scheduler retry it within its retry count. A pod
+that is still running from the previous EP process will complete unobserved and its result
+will be lost; for fixed-capacity Targets this also means the old pod's capacity slot must
+be released.
+
+The full recovery contract — whether the container entrypoint can signal EP before exiting,
+how to avoid double-execution, and how to handle capacity accounting — is a broad open
+area and needs its own design work.
 
 ---
 

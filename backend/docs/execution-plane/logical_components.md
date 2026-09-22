@@ -71,8 +71,8 @@ graph LR
   - Out: claimable `WorkItem`s to Work Scheduler; completion events to Completion Notifier
 
 - **Work Scheduler**
-  - In: claimed `WorkItem` from [`WorkStore`](work-store.md); `ReconcileResult` from `ExecutionTarget` Reconciler
-  - Out: dispatch to Worker Manager; demand signal to Pool Autoscaler
+  - In: claimed `WorkItem` from [`WorkStore`](work-store.md); ranked `ExecutionTarget`s (`ReconcileResult`) from `ExecutionTarget` Reconciler
+  - Out: demand signal to Pool Autoscaler; for each candidate `ExecutionTarget` in rank order, instantiates a `WorkerManager` and calls `dispatch` — moves to the next candidate on failure, leaves `WorkItem` in `PENDING` if all fail
 
 - **ExecutionTarget Reconciler**
   - In: `WorkRequirements` (selectors, isolation policy) from Scheduler; pool snapshots + health from `ExecutionTargetStore`
@@ -91,8 +91,8 @@ graph LR
   - Out: replica count adjustment to Worker Pool
 
 - **[Worker Manager](worker-manager.md)**
-  - In: `WorkItem` + `ExecutionTarget` from Scheduler
-  - Out: result and completion event written to [`WorkStore`](work-store.md); bounce-back state written to `ExecutionTargetStore` on K8s rejection. Obtains an `ExecutionTarget`, injects credentials, runs the work, collects output.
+  - In: `WorkItem` (instantiated by Work Scheduler for a specific `ExecutionTarget`; configured at construction, not passed at dispatch time)
+  - Out: result and completion event written to [`WorkStore`](work-store.md); bounce-back state written to `ExecutionTargetStore` on infrastructure rejection. Injects credentials, submits work to the cluster API, monitors execution, collects output.
 
 - **Credential Provider**
   - In: credential scope (from isolation policy on the `WorkItem` or the `ExecutionTarget`) + request from Worker Manager
@@ -113,6 +113,7 @@ graph LR
 - **Cluster Bootstrapper**
   - In: registration from Registration Provider
   - Out: provisioned K8s resources (namespace, ServiceAccount, RBAC) that become the Worker Pool
+  - *Note: whether EP provisions targets or customers provision them and EP discovers/validates them is an open design question. This component may become an "ExecutionTarget Discoverer" rather than a bootstrapper.*
 
 ---
 
