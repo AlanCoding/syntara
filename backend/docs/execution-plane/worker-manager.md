@@ -42,6 +42,21 @@ that knows how to speak the API of its cluster type. The `backend_type` field on
 
 ---
 
+## Hand-off to Work Watcher
+
+The Work Scheduler's scope ends when `dispatch` returns indicating the job has started.
+At that point the Scheduler creates a `WorkWatcher` — passing it enough context to locate
+and monitor the running job (at minimum the `WorkItem` ID and Target; for K8s, likely
+also the pod name or other infrastructure coordinates) — and then moves on to claim and
+dispatch more work. The `WorkWatcher` manages the job asynchronously from the Scheduler.
+
+A simple early implementation would use `asyncio.create_task()` per `WorkItem`. Future
+implementations may accumulate multiple `WorkItem`s into a single `WorkWatcher` instance
+for performance (e.g. batched polling rather than one coroutine per job). The exact
+interface between the Scheduler/WorkerManager and the WorkWatcher is not yet designed.
+
+---
+
 ## Submission
 
 To dispatch a `WorkItem`, the Worker Manager reads two records from the database:

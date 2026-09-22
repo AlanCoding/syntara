@@ -16,6 +16,12 @@ work payload — validates it, and writes a `WorkItem` record to the [`WorkStore
 The UUID is caller-owned. The Consumer generates it before submitting so it can track
 the work item without waiting for a response.
 
+The async execution path after submission: Work Scheduler claims the `WorkItem` and
+dispatches it via a `WorkerManager`; on successful start the Scheduler hands off to a
+`WorkWatcher` and moves on. The `WorkWatcher` monitors the running job and writes the
+result to the `WorkStore`, which triggers the Completion Notifier to fire the Consumer's
+callback. See [logical_components.md](logical_components.md) for the full picture.
+
 ---
 
 ## Submission interface
