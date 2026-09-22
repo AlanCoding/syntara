@@ -63,9 +63,16 @@ field on the `ExecutionTarget` determines which implementation is used.
 
 ## Capacity management
 
-The ExecutionTarget Reconciler returns an ordered list of eligible Targets by label matching. The
-Worker Manager is responsible for the next layer: ensuring it doesn't over-submit to a
-Target and handling K8s-level rejections.
+The `ExecutionTarget` Reconciler returns a ranked list of eligible Targets. Before the
+Work Scheduler calls `dispatch`, it must claim a capacity slot on the chosen Target —
+this claim happens *outside* `dispatch` so that the locking mechanism stays separate from
+the submission logic and users retain flexibility over how capacity is managed.
+
+The capacity claim mechanism is not yet settled. One option is to use the
+`WorkItem`→`ExecutionTarget` reference (see `pool-reconciler-notes.md` for the DB-level
+locking options), but the exact approach depends on the chosen locking model. What is
+clear: some form of lock or atomic reservation must be held before `dispatch` is called,
+because dispatching to a Target that is already at capacity wastes an infrastructure call.
 
 ### Proactive
 
@@ -73,10 +80,6 @@ Before submitting, check that the Target has remaining capacity by comparing
 `current_jobs` against `pool_size` in Postgres. This is the DB-level atomic selection
 described in `pool-reconciler-notes.md`. It is fast, local, and handles concurrent EP
 workers correctly without locking across K8s calls.
-
-This check requires that `execution_target_id` is already bound to the `WorkItem` — the
-Worker Manager must have selected and recorded a Target (see Target binding below) before
-it can look up that Target's capacity.
 
 ### Reactive
 

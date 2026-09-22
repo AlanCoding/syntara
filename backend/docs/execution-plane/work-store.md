@@ -64,7 +64,7 @@ Target whose `current_jobs` has reached `pool_size`.
 |---|---|
 | `claim_one()` | Atomically claims one `PENDING` item (`SELECT FOR UPDATE SKIP LOCKED`) |
 | `set_result(item, result, status)` | Writes result dict and transitions status |
-| `mark_signal_delivered(item)` | Sets `signaled_at` after Temporal callback confirmed — responsibility boundary between Worker Manager and Completion Notifier for output gathering and delivery is not yet settled; a dedicated streaming/result component may be needed for large output |
+| `mark_signal_delivered(item)` | Sets `signaled_at` after Temporal callback confirmed — called by the Completion Notifier once it has fired the callback. Output collection is the Work Watcher's responsibility; how it handles large or streamed output is not yet designed. |
 | `find_undelivered()` | Finds terminal items with `NULL signaled_at` for startup recovery |
 | `check_ready()` | Health check — verifies DB connectivity and can read work items |
 | `requeue_on_placement_failure(item)` | *(Not yet implemented)* Atomically resets status to `PENDING`, nulls the `ExecutionTarget` reference, and sets `last_placement_failed_at` — single UPDATE, no extra round-trip |

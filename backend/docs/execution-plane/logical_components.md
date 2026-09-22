@@ -19,6 +19,7 @@ graph LR
         RM["Resource Monitor"]
         PA["Pool Autoscaler"]
         WM["Worker Manager"]
+        WW["Work Watcher"]
         CP["Credential Provider"]
         CN["Completion Notifier"]
         RP["Registration Provider"]
@@ -35,6 +36,7 @@ graph LR
     SC -->|"resolve pool"| PR
     SC -->|"demand signal"| PA
     SC -->|"dispatch"| WM
+    SC -->|"hand off on start"| WW
 
     PR -->|"read pools + health"| REG
 
@@ -45,9 +47,11 @@ graph LR
 
     WM -->|"request credentials"| CP
     WM -->|"run work"| WP
-    WM -->|"write result + completion event"| WS
-    WM -->|"write bounce-back state"| REG
     WM -->|"record placement failure"| WS
+    WM -->|"write bounce-back state"| REG
+
+    WW -->|"monitor"| WP
+    WW -->|"write result + completion event"| WS
 
     CN -->|"read completion events"| WS
     CN -->|"notify"| Consumer
@@ -92,7 +96,11 @@ graph LR
 
 - **[Worker Manager](worker-manager.md)**
   - In: `WorkItem` (instantiated by Work Scheduler for a specific `ExecutionTarget`; configured at construction, not passed at dispatch time)
-  - Out: result and completion event written to [`WorkStore`](work-store.md); bounce-back state written to `ExecutionTargetStore` on infrastructure rejection. Injects credentials, submits work to the cluster API, monitors execution, collects output.
+  - Out: work submitted to the cluster API; placement failure recorded to [`WorkStore`](work-store.md); bounce-back state written to `ExecutionTargetStore` on infrastructure rejection. On successful start, hands off to Work Watcher.
+
+- **Work Watcher** *(placeholder — not yet designed)*
+  - In: hand-off from Work Scheduler after a `WorkItem` is successfully started
+  - Out: result and completion event written to [`WorkStore`](work-store.md), which triggers the Completion Notifier. Monitors the running job in the Worker Pool and collects output.
 
 - **Credential Provider**
   - In: credential scope (from isolation policy on the `WorkItem` or the `ExecutionTarget`) + request from Worker Manager
