@@ -18,7 +18,7 @@ from typing import Any
 
 import structlog
 
-from execution_plane.config import get_ep_settings
+from execution_plane.config import get_script_executor_settings
 from execution_plane.models.script_output import ScriptOutput
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -109,7 +109,7 @@ async def _cleanup_process(process: asyncio.subprocess.Process) -> None:
 
     """
     if process.returncode is None:
-        settings = get_ep_settings()
+        settings = get_script_executor_settings()
         # Process still running, terminate it gracefully
         try:
             process.terminate()
@@ -243,7 +243,7 @@ def _enforce_payload_limit(
     UTF-8 bytes, not the JSON-escaped form.
     """
     if max_bytes is None:
-        max_bytes = get_ep_settings().temporal_payload_max_bytes
+        max_bytes = get_script_executor_settings().temporal_payload_max_bytes
     serialized = json.dumps(result_dict)
     payload_size = len(serialized.encode("utf-8"))
     if payload_size <= max_bytes:
@@ -302,7 +302,7 @@ def _sanitize_env_value(value: object) -> str:
     # Limit environment variable size to prevent resource exhaustion
     # Note: Systems have limits on total env size (all vars combined), typically 128-256KB
     # We limit individual vars to prevent resource exhaustion and leave room for system variables
-    max_len = get_ep_settings().max_env_var_length
+    max_len = get_script_executor_settings().max_env_var_length
     if len(str_value) > max_len:
         msg = f"Environment variable value exceeds maximum length ({max_len} bytes)"
         raise ValueError(msg)
