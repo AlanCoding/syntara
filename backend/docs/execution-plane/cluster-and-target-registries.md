@@ -41,7 +41,7 @@ which work can be executed.
 |---|---|
 | `id` | UUID primary key |
 | `name` | Required, unique, human-readable name |
-| `endpoint` | Control-plane or provider endpoint; unique across Clusters |
+| `endpoint` | Cluster control-plane endpoint; unique across Clusters |
 | `status` | `REGISTERING`, `ACTIVE`, `DRAINING`, or `ERROR` |
 | `enabled` | Whether the Cluster may participate in selection or reconciliation |
 | `status_message` | Optional human-readable lifecycle or error detail |
@@ -52,8 +52,8 @@ which work can be executed.
 | `updated_by` | Actor or service identity that last changed the row |
 | `updated_at` | Last metadata or lifecycle update timestamp |
 
-The Cluster `endpoint` identifies the control-plane or provider endpoint. It
-is unique across Clusters: two Clusters cannot represent the same endpoint.
+The Cluster `endpoint` identifies the control-plane endpoint. It is unique
+across Clusters: two Clusters cannot represent the same endpoint.
 The `api_key` is a protected credential. Raw credentials are write-only and
 are never returned by normal reads, serialized into labels, written to logs,
 or included in API responses.
@@ -101,6 +101,12 @@ exactly one Cluster.
 | `updated_by` | Actor or service identity that last changed the row |
 | `updated_at` | Last metadata or lifecycle update timestamp |
 | `last_ran_at` | Last time work ran on the target |
+
+`backend_type` identifies the execution backend used by the target. Supported
+backends include a vanilla Kubernetes API and an OpenShell gateway. In this
+document, an execution backend or backend provider is the external system that
+hosts work; it is distinct from the discovery mechanism used during Cluster
+registration.
 
 The target `api_key` follows the same protection rules as the Cluster
 `api_key`. A target may have its own credential when the backend requires it;
@@ -194,30 +200,30 @@ Cluster cannot become `ACTIVE` until that target exists.
 
 Registration is a domain operation orchestrated by `ClusterRegistry` and
 persisted by `ClusterStore`. The registry owns the discovery workflow and
-provider interaction; the store owns only persistence, transactions, and
-lifecycle state changes.
+discovery-mechanism interaction; the store owns only persistence, transactions,
+and lifecycle state changes.
 
 At registration, `ClusterRegistry` first asks `ClusterStore` to create and
-persist the Cluster in `REGISTERING`. It then uses a discovery provider to
+persist the Cluster in `REGISTERING`. It then invokes a discovery mechanism to
 validate connectivity, discover configured targets, and determine which target
-is the protected default. The provider returns domain-level target definitions
-and discovery state; it does not return ORM instances or receive database
-sessions.
+is the protected default. The discovery mechanism returns domain-level target
+definitions and discovery state; it does not return ORM instances or receive
+database sessions.
 
-The provider boundary is:
+The discovery boundary is:
 
 ```text
 ClusterRegistry
   -> ClusterStore.create(cluster_definition)
-  -> ClusterDiscoveryProvider.discover(cluster_definition)
+  -> ClusterDiscoveryMechanism.discover(cluster_definition)
   -> ExecutionTargetRegistry.create(cluster_id, target_definition)
   -> ExecutionTargetStore.create(...)
 ```
 
 The registration sequence keeps persistence behind the store while leaving
-workflow orchestration in the registry. The provider returns domain data and
-does not receive a database session. `ClusterRegistry` selects which discovered
-target is the default and passes that designation to
+workflow orchestration in the registry. The discovery mechanism returns domain
+data and does not receive a database session. `ClusterRegistry` selects which
+discovered target is the default and passes that designation to
 `ExecutionTargetRegistry`; it does not create target records itself.
 
 ```mermaid
@@ -227,15 +233,15 @@ sequenceDiagram
     participant S as ClusterStore
     participant TR as ExecutionTargetRegistry
     participant TS as ExecutionTargetStore
-    participant P as DiscoveryProvider
+    participant D as DiscoveryMechanism
     participant DB as execution_plane DB
 
     C->>R: register(cluster_definition)
     R->>S: create(cluster_definition, REGISTERING)
     S->>DB: Insert Cluster REGISTERING and commit
     S-->>R: Cluster ID
-    R->>P: discover(cluster_definition)
-    P-->>R: discovery result and target definitions
+    R->>D: discover(cluster_definition)
+    D-->>R: discovery result and target definitions
     alt discovered and usable
         Note right of R: Select exactly one discovered target as default
         R->>TR: create default target
@@ -262,7 +268,7 @@ sequenceDiagram
     R-->>C: Cluster state
 ```
 
-Provider outcomes are `discovered` or `failed`. For a discovered
+Discovery outcomes are `discovered` or `failed`. For a discovered
 configuration, `ClusterRegistry` creates every target through
 `ExecutionTargetRegistry`, including exactly one target with
 `is_default=True`, and only then marks the Cluster `ACTIVE` through
@@ -273,8 +279,8 @@ register, the failures are logged and the Cluster still transitions to
 itself fails or the default target cannot be created, the existing Cluster is
 updated with `enabled=False`, status `ERROR`, and a suitable
 `status_message`; it is never made `ACTIVE`. `ERROR` is a terminal state.
-In the MVP, the provider may be a no-op and targets may be declared manually,
-but every `ACTIVE` Cluster still has a protected default target.
+In the MVP, the discovery mechanism may be a no-op and targets may be declared
+manually, but every `ACTIVE` Cluster still has a protected default target.
 
 ## Deletion and draining operation
 
@@ -388,9 +394,9 @@ from selection.
 ## Persistence and registry boundaries
 
 Registries are the domain-facing boundary; stores are the database-facing
-boundary. A registry may coordinate providers and drain polling, but only a
-store creates sessions, executes persistence operations, and commits or rolls
-back transactions.
+boundary. A registry may coordinate discovery mechanisms and drain polling,
+but only a store creates sessions, executes persistence operations, and commits
+or rolls back transactions.
 
 ```mermaid
 flowchart LR
@@ -436,7 +442,7 @@ and support asynchronous disposal/context-manager usage.
 `ClusterStore` provides creation of the `REGISTERING` record, retrieval,
 listing, Cluster status transitions, Cluster drain requests, and finalization
 guarded by the no-children invariant. It does not select or invoke a discovery
-provider and does not create ExecutionTargets.
+mechanism and does not create ExecutionTargets.
 
 `ExecutionTargetStore` provides target creation, retrieval, listing with
 optional eligibility filtering, narrow metadata updates, drain requests, and
@@ -445,7 +451,7 @@ drain operation has established that the target is safe to remove.
 
 ### Registries
 
-Registries are the domain-facing layer used by the router, discovery provider,
+Registries are the domain-facing layer used by the router, discovery mechanism,
 and drain consumers. They do not accept or expose SQLAlchemy sessions.
 
 `ClusterRegistry` exposes registration, retrieval, administrative listing, and
