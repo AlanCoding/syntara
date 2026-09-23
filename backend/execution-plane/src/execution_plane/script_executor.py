@@ -18,6 +18,7 @@ from typing import Any
 
 import structlog
 
+from execution_plane.config import get_script_executor_settings
 from execution_plane.models.script_output import ScriptOutput
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -45,15 +46,6 @@ SAFE_ENV_ALLOWLIST: frozenset[str] = frozenset(
 ENGINE_TIMEOUT_SECONDS_KEY = "_engine_timeout_seconds"
 ENGINE_MAX_OUTPUT_BYTES_KEY = "_engine_max_output_bytes"
 DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # 1 MB
-# Temporal's server-side limit.blobSize.error (must match development-sql.yaml).
-_TEMPORAL_BLOB_SIZE_ERROR = 2_097_152  # 2 MB
-# 10% headroom covers JSON escaping expansion and protobuf envelope overhead.
-TEMPORAL_PAYLOAD_MAX_BYTES = int(_TEMPORAL_BLOB_SIZE_ERROR * 0.9)
-
-# These match the Syntara settings defaults; override via environment if needed.
-SCRIPT_CLEANUP_TERMINATE_TIMEOUT = 1.0
-SCRIPT_CLEANUP_KILL_TIMEOUT = 0.5
-MAX_ENV_VAR_LENGTH = 32768  # 32 KB
 
 
 # --- Errors ---
@@ -117,16 +109,17 @@ async def _cleanup_process(process: asyncio.subprocess.Process) -> None:
 
     """
     if process.returncode is None:
+        settings = get_script_executor_settings()
         # Process still running, terminate it gracefully
         try:
             process.terminate()
-            await asyncio.wait_for(process.wait(), timeout=SCRIPT_CLEANUP_TERMINATE_TIMEOUT)
+            await asyncio.wait_for(process.wait(), timeout=settings.script_cleanup_terminate_timeout)
             logger.debug("Process terminated gracefully")
         except TimeoutError:
             logger.warning("Process didn't terminate gracefully, force killing")
             try:
                 process.kill()
-                await asyncio.wait_for(process.wait(), timeout=SCRIPT_CLEANUP_KILL_TIMEOUT)
+                await asyncio.wait_for(process.wait(), timeout=settings.script_cleanup_kill_timeout)
                 logger.info("Process force killed successfully")
             except TimeoutError:
                 logger.warning("Process didn't die after kill signal, may be zombie")
@@ -233,23 +226,24 @@ async def _communicate_limited(
 
 def _enforce_payload_limit(
     result_dict: dict[str, Any],
-    max_bytes: int = TEMPORAL_PAYLOAD_MAX_BYTES,
+    max_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Truncate stdout/stderr so the serialized activity result fits within Temporal's payload limit.
 
-    Temporal's server-side limit.blobSize.error (default 2MB) rejects oversized
-    activity results. The SDK treats the rejection as retryable, causing futile
-    retries until the activity times out. This check prevents that by truncating
-    before the payload leaves the worker.
+    Temporal's server-side limit.blobSize.error rejects oversized activity results.
+    The SDK treats the rejection as retryable, causing futile retries until the
+    activity times out. This check prevents that by truncating before the payload
+    leaves the worker.
 
-    Returns a new dict (does not mutate the input).
+    ``max_bytes`` defaults to ``EPSettings.temporal_payload_max_bytes`` (90% of
+    ``temporal_blob_size_error``). The 10% headroom covers JSON escaping expansion
+    and protobuf envelope overhead. Pass an explicit value in tests.
 
-    Truncation operates on raw UTF-8 bytes, not the JSON-escaped form. JSON
-    escaping can expand certain characters (e.g. newlines, quotes), so the
-    truncated payload may be slightly larger than ``max_bytes`` after
-    re-serialization. The 10% headroom in TEMPORAL_PAYLOAD_MAX_BYTES absorbs
-    this expansion.
+    Returns a new dict (does not mutate the input). Truncation operates on raw
+    UTF-8 bytes, not the JSON-escaped form.
     """
+    if max_bytes is None:
+        max_bytes = get_script_executor_settings().temporal_payload_max_bytes
     serialized = json.dumps(result_dict)
     payload_size = len(serialized.encode("utf-8"))
     if payload_size <= max_bytes:
@@ -308,8 +302,9 @@ def _sanitize_env_value(value: object) -> str:
     # Limit environment variable size to prevent resource exhaustion
     # Note: Systems have limits on total env size (all vars combined), typically 128-256KB
     # We limit individual vars to prevent resource exhaustion and leave room for system variables
-    if len(str_value) > MAX_ENV_VAR_LENGTH:
-        msg = f"Environment variable value exceeds maximum length ({MAX_ENV_VAR_LENGTH} bytes)"
+    max_len = get_script_executor_settings().max_env_var_length
+    if len(str_value) > max_len:
+        msg = f"Environment variable value exceeds maximum length ({max_len} bytes)"
         raise ValueError(msg)
 
     return str_value
