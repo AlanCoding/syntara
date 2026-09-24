@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ..models.integration_create_labels import IntegrationCreateLabels
     from ..models.llm_provider_configuration import LLMProviderConfiguration
     from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-    from ..models.open_shift_configuration import OpenShiftConfiguration
+    from ..models.openshift_configuration import OpenShiftConfiguration
 
 
 T = TypeVar("T", bound="IntegrationCreate")
@@ -155,7 +155,7 @@ class IntegrationCreate:
         from ..models.integration_create_labels import IntegrationCreateLabels
         from ..models.llm_provider_configuration import LLMProviderConfiguration
         from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-        from ..models.open_shift_configuration import OpenShiftConfiguration
+        from ..models.openshift_configuration import OpenShiftConfiguration
 
         d = dict(src_dict)
         name = d.pop("name")

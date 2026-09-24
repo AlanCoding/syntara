@@ -92,7 +92,7 @@ class OpenShiftConfiguration:
 
         ca_certificate = _parse_ca_certificate(d.pop("ca_certificate", UNSET))
 
-        open_shift_configuration = cls(
+        openshift_configuration = cls(
             base_url=base_url,
             namespace=namespace,
             integration_type=integration_type,
@@ -101,4 +101,4 @@ class OpenShiftConfiguration:
             ca_certificate=ca_certificate,
         )
 
-        return open_shift_configuration
+        return openshift_configuration

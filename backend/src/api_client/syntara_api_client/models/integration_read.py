@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from ..models.integration_read_labels import IntegrationReadLabels
     from ..models.llm_provider_configuration import LLMProviderConfiguration
     from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-    from ..models.open_shift_configuration import OpenShiftConfiguration
+    from ..models.openshift_configuration import OpenShiftConfiguration
     from ..models.user_reference import UserReference
 
 
@@ -284,7 +284,7 @@ class IntegrationRead:
         from ..models.integration_read_labels import IntegrationReadLabels
         from ..models.llm_provider_configuration import LLMProviderConfiguration
         from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-        from ..models.open_shift_configuration import OpenShiftConfiguration
+        from ..models.openshift_configuration import OpenShiftConfiguration
         from ..models.user_reference import UserReference
 
         d = dict(src_dict)

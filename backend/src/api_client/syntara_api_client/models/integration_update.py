@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ..models.integration_update_labels_type_0 import IntegrationUpdateLabelsType0
     from ..models.llm_provider_configuration import LLMProviderConfiguration
     from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-    from ..models.open_shift_configuration import OpenShiftConfiguration
+    from ..models.openshift_configuration import OpenShiftConfiguration
 
 
 T = TypeVar("T", bound="IntegrationUpdate")
@@ -55,7 +55,7 @@ class IntegrationUpdate:
         from ..models.integration_update_labels_type_0 import IntegrationUpdateLabelsType0
         from ..models.llm_provider_configuration import LLMProviderConfiguration
         from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-        from ..models.open_shift_configuration import OpenShiftConfiguration
+        from ..models.openshift_configuration import OpenShiftConfiguration
 
         name: None | str | Unset
         if isinstance(self.name, Unset):
@@ -139,7 +139,7 @@ class IntegrationUpdate:
         from ..models.integration_update_labels_type_0 import IntegrationUpdateLabelsType0
         from ..models.llm_provider_configuration import LLMProviderConfiguration
         from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-        from ..models.open_shift_configuration import OpenShiftConfiguration
+        from ..models.openshift_configuration import OpenShiftConfiguration
 
         d = dict(src_dict)
 

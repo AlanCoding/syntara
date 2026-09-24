@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from ..models.aap_configuration import AAPConfiguration
     from ..models.llm_provider_configuration import LLMProviderConfiguration
     from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-    from ..models.open_shift_configuration import OpenShiftConfiguration
+    from ..models.openshift_configuration import OpenShiftConfiguration
 
 
 T = TypeVar("T", bound="IntegrationTestConnection")
@@ -77,7 +77,7 @@ class IntegrationTestConnection:
         from ..models.aap_configuration import AAPConfiguration
         from ..models.llm_provider_configuration import LLMProviderConfiguration
         from ..models.mcp_server_configuration_input import MCPServerConfigurationInput
-        from ..models.open_shift_configuration import OpenShiftConfiguration
+        from ..models.openshift_configuration import OpenShiftConfiguration
 
         d = dict(src_dict)
         integration_type = IntegrationType(d.pop("integration_type"))
