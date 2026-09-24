@@ -196,8 +196,6 @@ mechanism that brings them together — affinity labels, capacity expressions, n
 selectors — is **not yet defined**. What is agreed:
 
 - Matching should be label/name-based from the user's perspective
-- It should be easy to write a Profile that no warm target satisfies, gracefully falling
-  back to cold-start
 - Permissions are a known concern; the model is an explicit TODO
 
 Defining affinity, matching, and capacity requires first pinning down what each supported
