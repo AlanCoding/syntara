@@ -85,6 +85,9 @@ target and a cold-start target can coexist on the same cluster with entirely dif
 WorkerManager implementations — `cluster_type` establishes *how to connect*, `backend_type`
 determines *how work runs*.
 
+For the detailed database schema, lifecycle state machines, and registry/store pattern, see
+[cluster-and-target-registries.md](cluster-and-target-registries.md).
+
 | Cluster type | Gateway | Notes |
 |---|---|---|
 | Local K8s | Kubernetes API server | Built-in; vendored with AO install; always present |
