@@ -39,14 +39,16 @@ alongside it:
    the EP service manages by default.
 
 These are distinct entities provisioned together in downstream. Dev environment behavior is TBD.
-The intended 1-to-1 relationship between an AO instance and its EP service is hard — one AO,
-one EP service.
+The 1-to-1 relationship is at the *service* level — one AO service to one EP service — and is
+a permanent architectural constraint, not an MVP simplification. Each service may run multiple
+replicas; a single AO service with several pods still pairs with a single EP service, which may
+itself have several worker replicas.
 
 ### Relationship to AO
 
 EP is intended to sit as a low-latency service *alongside* AO, not inside it. AO will submit
 work to EP and wait for an async callback. EP will manage its own database, its own worker
-processes, and its own cluster connections. The boundary crossings documented in `integration.md`
+processes, and its own cluster connections. The boundary crossings documented in [integration.md](integration.md)
 are temporary shortcuts toward this topology.
 
 ```mermaid
@@ -73,9 +75,15 @@ version combinations. The ep-client library (see §7) is the proposed bridge for
 
 ## 3. Clusters: gateway systems
 
-A **Cluster** is an independent compute system that EP accesses through a typed gateway
-interface. The gateway is the defining characteristic — it is what EP actually talks to
-when managing workloads.
+A **Cluster** is an independent compute system. `Cluster.cluster_type` determines which
+gateway API EP uses to reach it — the Kubernetes API server for K8s and OCP clusters,
+OpenShell's own gateway surface for OpenShell clusters. The gateway is the cluster's API
+surface; the WorkerManager holds that connection and dispatches work through it.
+
+`ExecutionTarget.backend_type` selects the WorkerManager implementation, so a warm-pool
+target and a cold-start target can coexist on the same cluster with entirely different
+WorkerManager implementations — `cluster_type` establishes *how to connect*, `backend_type`
+determines *how work runs*.
 
 | Cluster type | Gateway | Notes |
 |---|---|---|
@@ -180,9 +188,6 @@ mounts defined at provisioning time; a workload whose mount requirements match w
 Target provides can use it. Only workloads that need mounts the available warm targets
 cannot satisfy are forced to cold-start. Long-running listeners are a cold-start fit by
 nature, but that is a recommendation, not a structural constraint.
-
-The direction of fallback is one-way: cold-start is always the floor. A workload that
-explicitly requires a warm Target cannot fall back to cold-start.
 
 ### The matching problem (to be defined)
 
