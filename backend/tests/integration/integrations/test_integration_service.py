@@ -29,6 +29,7 @@ from syntara.integrations.models.integration import (
     IntegrationType,
     IntegrationUpdate,
 )
+from syntara.integrations.models.integration_configuration import OpenShiftConfiguration
 from syntara.integrations.services.integration_service import IntegrationService
 
 _UNRESTRICTED = AllowedProjectsResult(all_projects=True, project_ids=[])
@@ -151,6 +152,7 @@ class TestCreateIntegration:
         reloaded = await integration_service.get_integration(created.id)
 
         assert reloaded.integration_type == IntegrationType.OPENSHIFT
+        assert isinstance(reloaded.configuration, OpenShiftConfiguration)
         assert reloaded.configuration.namespace == "ep-dev-workers"
         assert reloaded.management_credential_id == credential.id
         assert "execution_target_id" not in reloaded.configuration.model_dump()

@@ -219,6 +219,7 @@ __all__ = (
     "OIDCTestResult",
     "OIDCTestResultClaimAliasesType0",
     "OIDCTestResultMetadataType0",
+    "OpenShiftConfiguration",
     "PercentileStats",
     "PermissionEntry",
     "PolicyCreate",
