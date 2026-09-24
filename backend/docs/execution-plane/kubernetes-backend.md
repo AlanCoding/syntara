@@ -135,7 +135,9 @@ the configured minimum.
 **Dispatching work to a pod:**
 
 EP picks any running pod from the Deployment that is not already claimed (tracked in EP
-state), and attaches to its container:
+state), and attaches to its container. The exact mechanism is being defined by the
+ANSTRAT-2422 team; they are currently exploring Extensions to expose a gRPC server for
+work dispatch. The approach below is a spitball for how the core loop would work:
 
 ```
 POST /api/v1/namespaces/{exec-ns}/pods/{name}/attach?stdin=true&stdout=true&stderr=true
