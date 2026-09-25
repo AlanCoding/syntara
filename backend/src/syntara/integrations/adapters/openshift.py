@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 _SELF_SUBJECT_REVIEW_PATH = "/apis/authentication.k8s.io/v1/selfsubjectreviews"
 _SELF_SUBJECT_REVIEW = {"apiVersion": "authentication.k8s.io/v1", "kind": "SelfSubjectReview"}
+_OPENSHIFT_CREDENTIAL_KEY = "bearer_token"
 
 
 class OpenShiftAdapter:
@@ -29,7 +30,7 @@ class OpenShiftAdapter:
     async def validate(self, resolved_credential: dict[str, Any], timeout_seconds: int) -> ValidateResult:
         """Ask the API server to identify the bearer token without creating a persisted resource."""
         checked_at = datetime.now(UTC)
-        token = resolved_credential.get("bearer_token")
+        token = resolved_credential.get(_OPENSHIFT_CREDENTIAL_KEY)
         if not isinstance(token, str) or not token.strip():
             return ValidateResult(
                 success=False,
