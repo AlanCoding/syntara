@@ -11,7 +11,11 @@ from typing import Any
 import asyncpg
 import structlog
 
+from execution_plane.bootstrap import bootstrap_local_cluster
+from execution_plane.cluster.cluster_store import ClusterStore
 from execution_plane.config import get_ep_settings, to_asyncpg_url
+from execution_plane.drain_monitor import DrainMonitor
+from execution_plane.execution_target.execution_target_store import ExecutionTargetStore
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
 from execution_plane.script_executor import ScriptExecutionError, execute_script
 from execution_plane.temporal_client import send_temporal_callback
@@ -136,18 +140,28 @@ async def run_worker(
 ) -> None:
     """Run processing until cancelled, using the supplied database and callback.
 
-    Cancellation closes both the notification listener and the polling task
-    before returning to the caller, then disposes the store's engine.
+    Cancellation closes both the notification listener and the polling task,
+    then disposes the WorkStore.
     """
-    async with WorkStore(database_url) as store:
-        await _recover_undelivered(store, completion_callback)
-        wakeup_event = asyncio.Event()
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(
-                _listen_loop(to_asyncpg_url(database_url), wakeup_event),
-                name="ep-listener",
-            )
-            tg.create_task(_poll_loop(store, wakeup_event, completion_callback), name="ep-poll")
+    await bootstrap_local_cluster(database_url)
+    async with (
+        WorkStore.from_database_url(database_url) as work_store,
+        ClusterStore.from_database_url(database_url) as cluster_store,
+        ExecutionTargetStore.from_database_url(database_url) as target_store,
+    ):
+        drain_monitor = DrainMonitor(target_store, cluster_store, work_store)
+        await drain_monitor.start()
+        try:
+            await _recover_undelivered(work_store, completion_callback)
+            wakeup_event = asyncio.Event()
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(
+                    _listen_loop(to_asyncpg_url(database_url), wakeup_event),
+                    name="ep-listener",
+                )
+                tg.create_task(_poll_loop(work_store, wakeup_event, completion_callback), name="ep-poll")
+        finally:
+            await drain_monitor.stop()
 
 
 async def _run() -> None:
