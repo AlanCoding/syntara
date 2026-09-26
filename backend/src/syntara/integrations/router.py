@@ -3,6 +3,10 @@
 from typing import Annotated
 from uuid import UUID
 
+from execution_plane.cluster.cluster_registry import ClusterRegistry, NoopDiscoveryMechanism
+from execution_plane.cluster.cluster_store import ClusterStore
+from execution_plane.execution_target.execution_target_registry import ExecutionTargetRegistry
+from execution_plane.execution_target.execution_target_store import ExecutionTargetStore
 from fastapi import Depends, Query, Request, status
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -90,7 +94,11 @@ def get_integration_service(
 ) -> IntegrationService:
     """Dependency provider for IntegrationService."""
     secret_service = create_secret_service(db)
-    return IntegrationService(db, current_user, secret_service)
+    target_store = ExecutionTargetStore.from_session(db)
+    target_registry = ExecutionTargetRegistry(target_store)
+    cluster_store = ClusterStore.from_session(db)
+    cluster_registry = ClusterRegistry(cluster_store, target_registry, NoopDiscoveryMechanism())
+    return IntegrationService(db, current_user, secret_service, cluster_registry)
 
 
 _read_gate = VisibilityFilter("integration", "read")

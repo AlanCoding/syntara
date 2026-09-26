@@ -14,6 +14,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from sqlmodel import SQLModel
 
 from syntara.core.lib.url_validation import validate_endpoint_url, validate_host_url
+from syntara.integrations.lib.url_validation import validate_integration_configuration_no_ssrf
 
 
 class LLMProviderHint(StrEnum):
@@ -158,7 +159,7 @@ class OpenShiftConfiguration(IntegrationSecurityMixin):
     @model_validator(mode="after")
     def validate_base_url_scheme(self) -> Self:
         """Require a TLS-protected API endpoint without a path or query."""
-        self.base_url = validate_host_url(self.base_url, allow_http=False)
+        validate_integration_configuration_no_ssrf(self)
         if self.allow_http or self.insecure_skip_tls_verify:
             msg = "OpenShift integrations require HTTPS with TLS verification"
             raise ValueError(msg)

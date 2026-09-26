@@ -150,6 +150,10 @@ class ClusterRegistry:
         """Return a Cluster through the persistence boundary."""
         return await self._store.get(cluster_id)
 
+    async def get_by_name(self, name: str) -> Cluster | None:
+        """Return a Cluster by name through the persistence boundary."""
+        return await self._store.get_by_name(name)
+
     async def list(self, *, status: ClusterStatus | None = None, enabled: bool | None = None) -> list[Cluster]:
         """List Clusters for administrative or recovery workflows."""
         return await self._store.list(status=status, enabled=enabled)

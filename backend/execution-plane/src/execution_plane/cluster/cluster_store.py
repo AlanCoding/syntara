@@ -71,6 +71,13 @@ class ClusterStore(StoreBase):
             cluster = await session.get(Cluster, cluster_id)
             return None if cluster is None else self._without_secret(cluster)
 
+    async def get_by_name(self, name: str) -> Cluster | None:
+        """Return a Cluster by name without its API credential."""
+        async with self._session_context() as session:
+            result = await session.execute(select(Cluster).where(col(Cluster.name) == name))
+            cluster = result.scalar_one_or_none()
+            return None if cluster is None else self._without_secret(cluster)
+
     async def list(self, *, status: ClusterStatus | None = None, enabled: bool | None = None) -> list[Cluster]:
         """List Clusters for administrative or recovery workflows."""
         statement = select(Cluster)
