@@ -6,6 +6,7 @@ import pytest
 from execution_plane.models.cluster import Cluster
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from syntara.integrations.models.integration import IntegrationType
@@ -44,7 +45,7 @@ class TestOpenShiftClusterSync:
         integration_id = resp.json()["id"]
 
         # Verify cluster was created with matching name
-        result = await db.execute(select(Cluster).where(Cluster.name == "test-cluster-create"))
+        result = await db.execute(select(Cluster).where(col(Cluster.name) == "test-cluster-create"))
         cluster = result.scalar_one_or_none()
         assert cluster is not None
         assert cluster.endpoint == "https://api.example.com:6443"
@@ -81,7 +82,7 @@ class TestOpenShiftClusterSync:
         integration_id = resp.json()["id"]
 
         # Verify cluster was created
-        result = await db.execute(select(Cluster).where(Cluster.name == "test-cluster-delete"))
+        result = await db.execute(select(Cluster).where(col(Cluster.name) == "test-cluster-delete"))
         cluster = result.scalar_one_or_none()
         assert cluster is not None
         cluster_id = cluster.id
@@ -91,7 +92,7 @@ class TestOpenShiftClusterSync:
         assert delete_resp.status_code == 204
 
         # Verify cluster was deleted (or marked DRAINING)
-        result = await db.execute(select(Cluster).where(Cluster.id == cluster_id))
+        result = await db.execute(select(Cluster).where(col(Cluster.id) == cluster_id))
         cluster = result.scalar_one_or_none()
         # Cluster should be marked DRAINING (not fully deleted yet, but marked for deletion)
         assert cluster is not None

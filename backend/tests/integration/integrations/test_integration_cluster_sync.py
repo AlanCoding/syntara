@@ -10,7 +10,7 @@ import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from syntara.core.models import User
-from syntara.core.services.secret_service import create_secret_service
+from syntara.core.services.secret_service import SecretService, create_secret_service
 from syntara.integrations.models.integration import (
     IntegrationCreate,
     IntegrationType,
@@ -38,7 +38,7 @@ def _openshift_create(
 async def _make_bearer_credential(
     credential_factory: CredentialFactory,
     token: str = "test-api-key",  # noqa: S107
-) -> tuple[UUID, object]:
+) -> tuple[UUID, SecretService]:
     ct = await credential_factory.create_type("HTTP Bearer Token")
     # HTTP Bearer Token maps the 'token' input to 'bearer_token' in extra_vars
     ct.injectors = {"extra_vars": {"bearer_token": "{{token}}"}, "env": {}, "file": {}}
