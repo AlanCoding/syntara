@@ -257,19 +257,6 @@ def _collect_local_details(
     return EnvironmentDetails(provider, cluster, endpoint, namespace, kubeconfig, labels)
 
 
-async def _register_environment_and_integration(details: EnvironmentDetails, database_url: str) -> None:
-    """Register the Cluster/ExecutionTarget and then the Credential/Integration."""
-    await _register_environment_record(details, database_url)
-    await register_integration_record(
-        name=details.name,
-        endpoint=details.endpoint,
-        namespace=details.namespace,
-        api_key=details.api_key,
-        actor_id=CLI_ACTOR_ID,
-        database_url=database_url,
-    )
-
-
 async def _register_environment_record(details: EnvironmentDetails, database_url: str) -> None:
     """Create or refresh the Cluster and its default target."""
     async with (
@@ -296,6 +283,19 @@ async def _register_environment_record(details: EnvironmentDetails, database_url
                 CLI_ACTOR_ID,
                 details.labels,
             )
+
+
+async def _register_environment_and_integration(details: EnvironmentDetails, database_url: str) -> None:
+    """Register the Cluster/ExecutionTarget and then the Credential/Integration."""
+    await _register_environment_record(details, database_url)
+    await register_integration_record(
+        name=details.name,
+        endpoint=details.endpoint,
+        namespace=details.namespace,
+        api_key=details.api_key,
+        actor_id=CLI_ACTOR_ID,
+        database_url=database_url,
+    )
 
 
 async def _remove_environment_record(provider: EnvironmentProvider, cluster_name: str, database_url: str) -> None:
