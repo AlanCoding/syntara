@@ -842,14 +842,17 @@ async def test_register_environment_and_integration_calls_both_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(dev_cli, "_register_environment_record", lambda *_: calls.append("env") or _noop())
-    monkeypatch.setattr(dev_cli, "_register_integration_record", lambda *_: calls.append("intg") or _noop())
+
+    async def _fake_env(*_: object) -> None:
+        calls.append("env")
+
+    async def _fake_intg(*_: object) -> None:
+        calls.append("intg")
+
+    monkeypatch.setattr(dev_cli, "_register_environment_record", _fake_env)
+    monkeypatch.setattr(dev_cli, "_register_integration_record", _fake_intg)
 
     details = _make_integration_details()
     await _register_environment_and_integration(details, "database")
 
     assert calls == ["env", "intg"]
-
-
-async def _noop() -> None:
-    """Async no-op for patching coroutine functions."""
