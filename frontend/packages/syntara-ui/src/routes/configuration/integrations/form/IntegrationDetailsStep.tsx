@@ -31,7 +31,7 @@ import styles from './WizardSteps.module.css'
 
 type ControlledTextFieldProps = Readonly<{
   control: Control<IntegrationFormData>
-  name: 'name' | 'description' | 'configuration.base_url'
+  name: 'name' | 'description' | 'configuration.base_url' | 'configuration.namespace'
   label: string
   fieldId: string
   placeholder: string
@@ -275,6 +275,53 @@ type IntegrationDetailsStepProps = Readonly<{
   onTypeChange: (newType: string) => void
 }>
 
+function getTypeConfig(
+  integrationType: string,
+  providerHint: string | undefined
+): {
+  nameLabel: string
+  namePlaceholder: string
+  showProviderHint: boolean
+  hideBaseUrl: boolean
+  requireBaseUrl: boolean
+  baseUrlPlaceholder: string
+} {
+  const isLLM = integrationType === IntegrationTypeEnum.LLM_PROVIDER
+  const isAAP = integrationType === IntegrationTypeEnum.ANSIBLE_AUTOMATION_PLATFORM
+  const isOpenShift = integrationType === IntegrationTypeEnum.OPENSHIFT
+
+  if (isLLM) {
+    return {
+      nameLabel: 'Name',
+      namePlaceholder: 'Enter provider name',
+      showProviderHint: true,
+      hideBaseUrl: typeof providerHint === 'string' && PROVIDERS_HIDING_BASE_URL.has(providerHint),
+      requireBaseUrl: typeof providerHint === 'string' && PROVIDERS_REQUIRING_BASE_URL.has(providerHint),
+      baseUrlPlaceholder: 'https://api.example.com/v1',
+    }
+  }
+
+  if (isOpenShift) {
+    return {
+      nameLabel: 'Cluster name',
+      namePlaceholder: 'Enter cluster name',
+      showProviderHint: false,
+      hideBaseUrl: false,
+      requireBaseUrl: true,
+      baseUrlPlaceholder: 'https://api.example.com:6443',
+    }
+  }
+
+  return {
+    nameLabel: 'Server name / ID',
+    namePlaceholder: 'Enter server name / ID',
+    showProviderHint: false,
+    hideBaseUrl: false,
+    requireBaseUrl: true,
+    baseUrlPlaceholder: isAAP ? 'e.g. https://aap.example.com' : 'https://mcp-server.example.com/mcp',
+  }
+}
+
 export function IntegrationDetailsStep({ control, setValue, onTypeChange }: IntegrationDetailsStepProps) {
   const scope = useWatch({ control, name: 'scope' })
   const integrationType = useWatch({ control, name: 'integration_type' })
@@ -284,23 +331,8 @@ export function IntegrationDetailsStep({ control, setValue, onTypeChange }: Inte
 
   const isLLM = integrationType === IntegrationTypeEnum.LLM_PROVIDER
   const isAAP = integrationType === IntegrationTypeEnum.ANSIBLE_AUTOMATION_PLATFORM
-  const typeConfig = isLLM
-    ? {
-        nameLabel: 'Name',
-        namePlaceholder: 'Enter provider name',
-        showProviderHint: true,
-        hideBaseUrl: typeof providerHint === 'string' && PROVIDERS_HIDING_BASE_URL.has(providerHint),
-        requireBaseUrl: typeof providerHint === 'string' && PROVIDERS_REQUIRING_BASE_URL.has(providerHint),
-        baseUrlPlaceholder: 'https://api.example.com/v1',
-      }
-    : {
-        nameLabel: 'Server name / ID',
-        namePlaceholder: 'Enter server name / ID',
-        showProviderHint: false,
-        hideBaseUrl: false,
-        requireBaseUrl: true,
-        baseUrlPlaceholder: isAAP ? 'e.g. https://aap.example.com' : 'https://mcp-server.example.com/mcp',
-      }
+  const isOpenShift = integrationType === IntegrationTypeEnum.OPENSHIFT
+  const typeConfig = getTypeConfig(integrationType, providerHint)
 
   const renderTypeToggle = useCallback(
     (toggleRef: Ref<MenuToggleElement>) => (
@@ -406,11 +438,23 @@ export function IntegrationDetailsStep({ control, setValue, onTypeChange }: Inte
           <ControlledTextField
             control={control}
             name="configuration.base_url"
-            label="API URL"
+            label={isOpenShift ? 'Cluster URL' : 'API URL'}
             fieldId="base-url"
             placeholder={typeConfig.baseUrlPlaceholder}
             isRequired={typeConfig.requireBaseUrl}
             labelHelp={isAAP ? integrationHelp.aapUrl : integrationHelp.apiUrl}
+          />
+        )}
+
+        {isOpenShift && (
+          <ControlledTextField
+            control={control}
+            name="configuration.namespace"
+            label="Namespace"
+            fieldId="namespace"
+            placeholder="default"
+            isRequired
+            labelHelp={<Content>Namespace reserved for execution workloads</Content>}
           />
         )}
 

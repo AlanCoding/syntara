@@ -79,6 +79,7 @@ class ExecutionTargetRegistry:
         updated_by: uuid.UUID,
         name: str | None = None,
         endpoint: str | None = None,
+        namespace: str | None = None,
         labels: dict[str, Any] | None = None,
         status_message: str | None = None,
         api_key: str | None = None,
@@ -89,9 +90,28 @@ class ExecutionTargetRegistry:
             updated_by=updated_by,
             name=name,
             endpoint=endpoint,
+            namespace=namespace,
             labels=labels,
             status_message=status_message,
             api_key=api_key,
+        )
+
+    async def reactivate(
+        self,
+        target_id: uuid.UUID,
+        *,
+        updated_by: uuid.UUID,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        namespace: str | None = None,
+    ) -> ExecutionTarget:
+        """Re-enable a DRAINING target and transition it back to ACTIVE."""
+        return await self._store.reactivate(
+            target_id,
+            updated_by=updated_by,
+            endpoint=endpoint,
+            api_key=api_key,
+            namespace=namespace,
         )
 
     async def _require_non_default(self, target_id: uuid.UUID) -> ExecutionTarget:

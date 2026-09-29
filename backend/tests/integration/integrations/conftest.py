@@ -81,6 +81,21 @@ async def aap_credential_id(credential_factory: CredentialFactory) -> UUID:
     return UUID(str(cred.id))
 
 
+@pytest_asyncio.fixture
+async def http_bearer_token_credential_id(credential_factory: CredentialFactory) -> UUID:
+    """Create an HTTP Bearer Token credential with a stored secret and return its ID."""
+    from syntara.core.services.secret_service import create_secret_service
+
+    ct = await credential_factory.create_type("HTTP Bearer Token")
+    ct.injectors = {"extra_vars": {"bearer_token": "{{token}}"}, "env": {}, "file": {}}
+    project = await credential_factory.create_project()
+    cred = await credential_factory.create(ct, project)
+    secret_service = create_secret_service(credential_factory.session)
+    cred.secret_id = await secret_service.create_secret({"token": "test-bearer-token"})
+    await credential_factory.session.flush()
+    return UUID(str(cred.id))
+
+
 def make_llm_create(name: str = "My LLM Provider", **kwargs: object) -> IntegrationCreate:
     """Create an IntegrationCreate for an LLM provider with sensible defaults."""
     defaults: dict[str, object] = {

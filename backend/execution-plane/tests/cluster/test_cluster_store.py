@@ -291,3 +291,106 @@ async def test_finalize_delete_ignores_an_enabled_cluster() -> None:
     await store.finalize_delete(cluster.id)
 
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_update_patches_mutable_fields_and_redacts_credentials() -> None:
+    cluster = _cluster()
+    actor_id = uuid.uuid4()
+    session = _Session(cluster=cluster)
+    store = _store(session)
+
+    result = await store.update(
+        cluster.id,
+        updated_by=actor_id,
+        name="renamed-cluster",
+        endpoint="https://new.example",
+        api_key="new-secret",
+    )
+
+    assert cluster.name == "renamed-cluster"
+    assert cluster.endpoint == "https://new.example"
+    assert cluster.api_key == "new-secret"
+    assert cluster.updated_by == actor_id
+    assert result.api_key == ""
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_update_leaves_unspecified_fields_unchanged() -> None:
+    cluster = _cluster()
+    original_name = cluster.name
+    original_endpoint = cluster.endpoint
+    session = _Session(cluster=cluster)
+    store = _store(session)
+
+    await store.update(cluster.id, updated_by=uuid.uuid4(), api_key="refreshed-key")
+
+    assert cluster.name == original_name
+    assert cluster.endpoint == original_endpoint
+    assert cluster.api_key == "refreshed-key"
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_update_rolls_back_for_a_missing_cluster() -> None:
+    session = _Session()
+    store = _store(session)
+
+    with pytest.raises(ClusterNotFoundError):
+        await store.update(uuid.uuid4(), updated_by=uuid.uuid4(), name="new-name")
+
+    assert session.rollbacks == 1
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_update_rolls_back_when_commit_fails() -> None:
+    cluster = _cluster()
+    session = _Session(cluster=cluster, fail_commit=True)
+    store = _store(session)
+
+    with pytest.raises(RuntimeError, match=_DATABASE_UNAVAILABLE):
+        await store.update(cluster.id, updated_by=uuid.uuid4(), name="new-name")
+
+    assert session.rollbacks == 1
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_reactivate_re_enables_a_draining_cluster() -> None:
+    cluster = _cluster(status=ClusterStatus.DRAINING)
+    cluster.enabled = False
+    actor_id = uuid.uuid4()
+    session = _Session(cluster=cluster)
+    store = _store(session)
+
+    result = await store.reactivate(
+        cluster.id,
+        updated_by=actor_id,
+        endpoint="https://new.example",
+        api_key="new-secret",
+        labels={"env": "dev"},
+    )
+
+    assert cluster.enabled is True
+    assert cluster.status is ClusterStatus.ACTIVE
+    assert cluster.status_message is None
+    assert cluster.endpoint == "https://new.example"
+    assert cluster.api_key == "new-secret"
+    assert cluster.labels == {"env": "dev"}
+    assert cluster.updated_by == actor_id
+    assert result.api_key == ""
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_reactivate_rolls_back_for_a_missing_cluster() -> None:
+    session = _Session()
+    store = _store(session)
+
+    with pytest.raises(ClusterNotFoundError):
+        await store.reactivate(uuid.uuid4(), updated_by=uuid.uuid4())
+
+    assert session.rollbacks == 1
+    await store.close()

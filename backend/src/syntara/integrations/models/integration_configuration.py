@@ -158,7 +158,7 @@ class OpenShiftConfiguration(IntegrationSecurityMixin):
     @model_validator(mode="after")
     def validate_base_url_scheme(self) -> Self:
         """Require a TLS-protected API endpoint without a path or query."""
-        self.base_url = validate_host_url(self.base_url, allow_http=False)
+        self.base_url = validate_host_url(self.base_url, allow_http=self.allow_http)
         if self.allow_http or self.insecure_skip_tls_verify:
             msg = "OpenShift integrations require HTTPS with TLS verification"
             raise ValueError(msg)
