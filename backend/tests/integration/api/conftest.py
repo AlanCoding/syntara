@@ -5,7 +5,7 @@ API tests work with authorization always enabled, using the real rego policy
 instead of a Python reimplementation.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -14,10 +14,12 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy import insert
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from syntara.api.main import app
+from syntara.audit.outbox.worker import get_outbox_worker
 from syntara.auth.dependencies import get_current_user
 from syntara.authz.dependencies import get_authz_evaluator
 from syntara.authz.evaluator import evaluate_policy_input
@@ -33,6 +35,33 @@ _TEST_GROUP_NAME = "test-users"
 def _opa_evaluate_cli(opa_input: dict[str, Any]) -> dict[str, Any]:
     """Evaluate authz using regopy against the real rego policy."""
     return evaluate_policy_input(opa_input)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_outbox_worker_for_test(
+    test_db_session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncGenerator[None, None]:
+    """Isolate the audit outbox worker singleton between tests.
+
+    Clears stale tasks (from prior test event loops) and points the singleton's
+    session factories at the current test DB so writes and drain queries hit the
+    same testcontainer database that the test itself uses.
+    """
+    if get_outbox_worker.cache_info().currsize == 0:
+        yield
+        return
+
+    worker = get_outbox_worker()
+    worker._pending.clear()
+    original_write_factory = worker._write_session_factory
+    original_session_factory = worker._session_factory
+    worker._write_session_factory = test_db_session_factory
+    worker._session_factory = test_db_session_factory
+    try:
+        yield
+    finally:
+        worker._write_session_factory = original_write_factory
+        worker._session_factory = original_session_factory
 
 
 @pytest.fixture(autouse=True)

@@ -172,7 +172,7 @@ class ClusterRegistry:
             target = await self._execution_target_registry.create(
                 cluster_id=cluster.id,
                 name=name,
-                backend_type=BackendType.OPENSHELL,
+                backend_type=BackendType.VANILLA_K8S,
                 endpoint=endpoint,
                 api_key=api_key,
                 namespace=namespace,
