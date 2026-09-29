@@ -21,7 +21,7 @@ class TestOpenShiftClusterSync:
     async def test_create_openshift_integration_creates_cluster(
         self,
         auth_client: AsyncClient,
-        db: AsyncSession,
+        test_db_session: AsyncSession,
         http_bearer_token_credential_id: UUID,
     ) -> None:
         """Creating an OpenShift integration should create a cluster record."""
@@ -45,7 +45,7 @@ class TestOpenShiftClusterSync:
         integration_id = resp.json()["id"]
 
         # Verify cluster was created with matching name
-        result = await db.execute(select(Cluster).where(col(Cluster.name) == "test-cluster-create"))
+        result = await test_db_session.execute(select(Cluster).where(col(Cluster.name) == "test-cluster-create"))
         cluster = result.scalar_one_or_none()
         assert cluster is not None
         assert cluster.endpoint == "https://api.example.com:6443"
@@ -57,7 +57,7 @@ class TestOpenShiftClusterSync:
     async def test_delete_openshift_integration_deletes_cluster(
         self,
         auth_client: AsyncClient,
-        db: AsyncSession,
+        test_db_session: AsyncSession,
         http_bearer_token_credential_id: UUID,
     ) -> None:
         """Deleting an OpenShift integration should delete the cluster record."""
@@ -82,7 +82,7 @@ class TestOpenShiftClusterSync:
         integration_id = resp.json()["id"]
 
         # Verify cluster was created
-        result = await db.execute(select(Cluster).where(col(Cluster.name) == "test-cluster-delete"))
+        result = await test_db_session.execute(select(Cluster).where(col(Cluster.name) == "test-cluster-delete"))
         cluster = result.scalar_one_or_none()
         assert cluster is not None
         cluster_id = cluster.id
@@ -92,7 +92,7 @@ class TestOpenShiftClusterSync:
         assert delete_resp.status_code == 204
 
         # Verify cluster was deleted (or marked DRAINING)
-        result = await db.execute(select(Cluster).where(col(Cluster.id) == cluster_id))
+        result = await test_db_session.execute(select(Cluster).where(col(Cluster.id) == cluster_id))
         cluster = result.scalar_one_or_none()
         # Cluster should be marked DRAINING (not fully deleted yet, but marked for deletion)
         assert cluster is not None
