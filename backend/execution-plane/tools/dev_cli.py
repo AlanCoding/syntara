@@ -11,22 +11,18 @@ import sys
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol
 
 from ao_registration import register_integration_record
 from execution_plane.cluster.cluster_registry import (
-    ClusterRegistration,
     ClusterRegistry,
-    DiscoveredExecutionTarget,
-    DiscoveryResult,
+    NoopDiscoveryMechanism,
 )
 from execution_plane.cluster.cluster_store import ClusterStore
 from execution_plane.execution_target.execution_target_registry import ExecutionTargetRegistry
 from execution_plane.execution_target.execution_target_store import ExecutionTargetStore
-from execution_plane.models.cluster import Cluster, ClusterStatus
-from execution_plane.models.execution_target import BackendType
+from execution_plane.models.cluster import ClusterStatus
 from execution_plane.models.work_item import WorkItem
 from execution_plane.work_store import WorkStore
 from sqlalchemy import delete
@@ -112,47 +108,6 @@ class EnvironmentDetails:
     namespace: str
     api_key: str
     labels: dict[str, str]
-
-
-def _find_registered_cluster(clusters: Sequence[Cluster], details: EnvironmentDetails) -> Cluster | None:
-    """Find a CLI registration by stable labels, falling back to endpoint."""
-    labeled = next(
-        (
-            candidate
-            for candidate in clusters
-            if candidate.labels.get("provider") == details.labels.get("provider")
-            and candidate.labels.get("cluster") == details.labels.get("cluster")
-        ),
-        None,
-    )
-    return labeled or next((candidate for candidate in clusters if candidate.endpoint == details.endpoint), None)
-
-
-def _require_active_registration(cluster: Cluster) -> Cluster:
-    """Reject a registration that completed with an error state."""
-    if cluster.status is not ClusterStatus.ACTIVE:
-        raise EnvironmentSelectionError(f"registration failed for Cluster '{cluster.name}'")
-    return cluster
-
-
-async def _refresh_registered_cluster(
-    cluster_store: ClusterStore, cluster: Cluster, details: EnvironmentDetails
-) -> None:
-    """Refresh CLI-owned connection details without expanding the store API."""
-    async with cluster_store._session_context() as session:  # noqa: SLF001
-        try:
-            persisted = await session.get(Cluster, cluster.id, with_for_update=True)
-            if persisted is None:
-                raise EnvironmentSelectionError(f"Cluster '{cluster.name}' no longer exists")
-            persisted.endpoint = details.endpoint
-            persisted.api_key = details.api_key
-            persisted.labels = details.labels
-            persisted.updated_by = CLI_ACTOR_ID
-            persisted.updated_at = datetime.now(UTC)
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
 
 
 async def _remove_target_work_items(work_store: WorkStore, target_id: uuid.UUID) -> None:
@@ -302,28 +257,6 @@ def _collect_local_details(
     return EnvironmentDetails(provider, cluster, endpoint, namespace, kubeconfig, labels)
 
 
-class _CliDiscoveryMechanism:
-    """Represent one CLI-selected namespace as the cluster's default target."""
-
-    def __init__(self, details: EnvironmentDetails) -> None:
-        self._details = details
-
-    def discover(self, registration: ClusterRegistration) -> DiscoveryResult:
-        """Return the selected namespace as a default target."""
-        return DiscoveryResult.discovered(
-            [
-                DiscoveredExecutionTarget(
-                    name=f"{registration.name}-default",
-                    backend_type=BackendType.VANILLA_K8S,
-                    endpoint=registration.endpoint,
-                    namespace=self._details.namespace,
-                    api_key=self._details.api_key,
-                    is_default=True,
-                )
-            ]
-        )
-
-
 async def _register_environment_and_integration(details: EnvironmentDetails, database_url: str) -> None:
     """Register the Cluster/ExecutionTarget and then the Credential/Integration."""
     await _register_environment_record(details, database_url)
@@ -338,58 +271,31 @@ async def _register_environment_and_integration(details: EnvironmentDetails, dat
 
 
 async def _register_environment_record(details: EnvironmentDetails, database_url: str) -> None:
-    """Create or reuse the Cluster and its protected default target."""
+    """Create or refresh the Cluster and its default target."""
     async with (
         ClusterStore.from_database_url(database_url) as cluster_store,
         ExecutionTargetStore.from_database_url(database_url) as target_store,
     ):
         target_registry = ExecutionTargetRegistry(target_store)
-        cluster_registry = ClusterRegistry(cluster_store, target_registry, _CliDiscoveryMechanism(details))
-        cluster = _find_registered_cluster(await cluster_registry.list(), details)
-        if cluster is None:
-            registered = await cluster_registry.register(
-                details.name,
-                details.endpoint,
-                details.api_key,
-                CLI_ACTOR_ID,
-                details.labels,
-            )
-            _require_active_registration(registered)
-            return
-
-        await _refresh_registered_cluster(cluster_store, cluster, details)
-
-        targets = await target_registry.list(cluster_id=cluster.id)
-        default_target = next((target for target in targets if target.is_default), None)
-        if default_target is not None:
-            if default_target.namespace != details.namespace:
-                raise EnvironmentSelectionError(
-                    f"Cluster '{cluster.name}' already has default namespace '{default_target.namespace}'"
-                )
-            await target_registry.update(
-                default_target.id,
+        cluster_registry = ClusterRegistry(cluster_store, target_registry, NoopDiscoveryMechanism())
+        existing = await cluster_registry.get_by_name(details.name)
+        if existing is not None and existing.status is not ClusterStatus.DRAINING:
+            await cluster_registry.sync_update(
+                existing.id,
                 updated_by=CLI_ACTOR_ID,
                 endpoint=details.endpoint,
                 api_key=details.api_key,
+                namespace=details.namespace,
             )
-            return
-        if not cluster.enabled or cluster.status not in {ClusterStatus.ACTIVE, ClusterStatus.REGISTERING}:
-            raise EnvironmentSelectionError(f"Cluster '{cluster.name}' is not available for target registration")
-
-        target = await target_registry.create(
-            cluster_id=cluster.id,
-            name=f"{details.name}-default",
-            backend_type=BackendType.VANILLA_K8S,
-            endpoint=details.endpoint,
-            namespace=details.namespace,
-            api_key=details.api_key,
-            is_default=True,
-            created_by=CLI_ACTOR_ID,
-            labels={},
-        )
-        await target_registry.activate(target.id, CLI_ACTOR_ID)
-        if cluster.status is ClusterStatus.REGISTERING:
-            await cluster_store.record_discovery_state(cluster.id, ClusterStatus.ACTIVE, None, CLI_ACTOR_ID)
+        else:
+            await cluster_registry.provision(
+                details.name,
+                details.endpoint,
+                details.api_key,
+                details.namespace,
+                CLI_ACTOR_ID,
+                details.labels,
+            )
 
 
 async def _remove_environment_record(provider: EnvironmentProvider, cluster_name: str, database_url: str) -> None:

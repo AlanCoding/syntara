@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Self
 
 import dev_cli
@@ -19,23 +18,18 @@ from dev_cli import (
     EnvironmentSelectionError,
     LocalEnvironment,
     OpenShiftEnvironment,
-    _CliDiscoveryMechanism,
     _collect_local_details,
     _collect_openshift_details,
-    _find_registered_cluster,
-    _refresh_registered_cluster,
     _register_environment_and_integration,
     _register_environment_record,
     _remove_environment_record,
     _remove_target_work_items,
-    _require_active_registration,
     available_local_providers,
     main,
     select_provider,
 )
-from execution_plane.cluster.cluster_registry import ClusterRegistration
 from execution_plane.cluster.cluster_store import ClusterStore
-from execution_plane.models.cluster import Cluster, ClusterStatus
+from execution_plane.models.cluster import ClusterStatus
 
 _DATABASE_UNAVAILABLE = "database unavailable"
 
@@ -124,17 +118,19 @@ def _store_factory(store: object) -> type[object]:
 
 
 class _ClusterRegistry:
-    def __init__(self, clusters: list[object], registered: object | None = None) -> None:
-        self.clusters = clusters
-        self.registered = registered
-        self.register_calls: list[tuple[object, ...]] = []
+    def __init__(self, existing: object | None = None) -> None:
+        self.existing = existing
+        self.provision_calls: list[tuple[object, ...]] = []
+        self.sync_update_calls: list[dict[str, object]] = []
 
-    async def list(self) -> list[object]:
-        return self.clusters
+    async def get_by_name(self, _name: str) -> object | None:
+        return self.existing
 
-    async def register(self, *args: object) -> object:
-        self.register_calls.append(args)
-        return self.registered
+    async def provision(self, *args: object) -> None:
+        self.provision_calls.append(args)
+
+    async def sync_update(self, cluster_id: object, **kwargs: object) -> None:
+        self.sync_update_calls.append({"cluster_id": cluster_id, **kwargs})
 
 
 class _TargetRegistry:
@@ -436,53 +432,6 @@ def test_local_details_create_namespace_when_missing() -> None:
     ]
 
 
-def test_cli_discovery_preserves_the_selected_namespace() -> None:
-    details = EnvironmentDetails(
-        EnvironmentProvider.OPENSHIFT,
-        "remote-openshift",
-        "https://api.example.com:6443",
-        "production",
-        "token",
-        {"provider": "openshift"},
-    )
-
-    result = _CliDiscoveryMechanism(details).discover(
-        ClusterRegistration("remote-openshift", details.endpoint, details.api_key, details.labels)
-    )
-
-    assert result.targets[0].namespace == "production"
-    assert result.targets[0].is_default is True
-
-
-def test_registered_cluster_lookup_prefers_cli_labels_when_endpoint_changes() -> None:
-    details = EnvironmentDetails(
-        EnvironmentProvider.MINIKUBE,
-        "execution-plane",
-        "https://new-endpoint",
-        "execution-plane",
-        "credentials",
-        {"provider": "minikube", "cluster": "execution-plane"},
-    )
-    labeled_cluster = type(
-        "ClusterRecord",
-        (),
-        {
-            "name": "execution-plane",
-            "endpoint": "https://old-endpoint",
-            "labels": {"provider": "minikube", "cluster": "execution-plane"},
-        },
-    )()
-
-    assert _find_registered_cluster([labeled_cluster], details) is labeled_cluster
-
-
-def test_registration_rejects_error_cluster() -> None:
-    cluster = type("ClusterRecord", (), {"name": "execution-plane", "status": ClusterStatus.ERROR})()
-
-    with pytest.raises(EnvironmentSelectionError, match="registration failed"):
-        _require_active_registration(cluster)
-
-
 def test_cluster_store_does_not_expose_cli_connection_updates() -> None:
     assert not hasattr(ClusterStore, "update_connection")
 
@@ -509,61 +458,8 @@ async def test_cli_cleanup_rolls_back_when_work_item_deletion_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_refresh_registered_cluster_updates_connection_details() -> None:
-    now = datetime.now(UTC)
-    cluster = Cluster(
-        id=uuid.uuid4(),
-        name="execution-plane",
-        endpoint="https://old.example",
-        api_key="old-key",
-        labels={},
-        created_by=dev_cli.CLI_ACTOR_ID,
-        created_at=now,
-        updated_by=dev_cli.CLI_ACTOR_ID,
-        updated_at=now,
-    )
-
-    details = EnvironmentDetails(
-        EnvironmentProvider.KIND,
-        "execution-plane",
-        "https://new.example",
-        "execution",
-        "new-key",
-        {"provider": "kind", "cluster": "execution-plane"},
-    )
-
-    await _refresh_registered_cluster(_SessionStore(_Session(result=cluster)), cluster, details)
-
-    assert cluster.endpoint == details.endpoint
-    assert cluster.api_key == details.api_key
-    assert cluster.labels == details.labels
-    assert cluster.updated_by == dev_cli.CLI_ACTOR_ID
-
-
-@pytest.mark.asyncio
-async def test_refresh_registered_cluster_rolls_back_when_cluster_is_missing() -> None:
-    session = _Session()
-
-    cluster = type("ClusterRecord", (), {"id": uuid.uuid4(), "name": "execution-plane"})()
-    details = EnvironmentDetails(
-        EnvironmentProvider.KIND,
-        "execution-plane",
-        "https://new.example",
-        "execution",
-        "new-key",
-        {},
-    )
-
-    with pytest.raises(EnvironmentSelectionError, match="no longer exists"):
-        await _refresh_registered_cluster(_SessionStore(session), cluster, details)
-
-    assert session.rollbacks == 1
-
-
-@pytest.mark.asyncio
-async def test_register_environment_record_registers_a_new_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
-    cluster = type("ClusterRecord", (), {"status": ClusterStatus.ACTIVE})()
-    registry = _ClusterRegistry([], cluster)
+async def test_register_environment_record_provisions_a_new_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _ClusterRegistry(existing=None)
     monkeypatch.setattr(dev_cli, "ClusterStore", _store_factory(object()))
     monkeypatch.setattr(dev_cli, "ExecutionTargetStore", _store_factory(object()))
     monkeypatch.setattr(dev_cli, "ClusterRegistry", lambda *_: registry)
@@ -579,36 +475,22 @@ async def test_register_environment_record_registers_a_new_cluster(monkeypatch: 
 
     await _register_environment_record(details, "database")
 
-    assert registry.register_calls == [
-        (details.name, details.endpoint, details.api_key, dev_cli.CLI_ACTOR_ID, details.labels)
+    assert registry.provision_calls == [
+        (details.name, details.endpoint, details.api_key, details.namespace, dev_cli.CLI_ACTOR_ID, details.labels)
     ]
+    assert registry.sync_update_calls == []
 
 
 @pytest.mark.asyncio
-async def test_register_environment_record_refreshes_existing_default_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    now = datetime.now(UTC)
-    cluster = Cluster(
-        id=uuid.uuid4(),
-        name="execution-plane",
-        endpoint="https://old.example",
-        api_key="old-key",
-        labels={"provider": "kind", "cluster": "execution-plane"},
-        status=ClusterStatus.ACTIVE,
-        created_by=dev_cli.CLI_ACTOR_ID,
-        created_at=now,
-        updated_by=dev_cli.CLI_ACTOR_ID,
-        updated_at=now,
-    )
-    target = type("TargetRecord", (), {"id": uuid.uuid4(), "is_default": True, "namespace": "execution-plane"})()
-    target_registry = _TargetRegistry([target])
-    monkeypatch.setattr(
-        dev_cli,
-        "ClusterStore",
-        _store_factory(_SessionStore(_Session(result=cluster))),
-    )
+async def test_register_environment_record_syncs_an_existing_active_cluster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cluster_id = uuid.uuid4()
+    existing = type("ClusterRecord", (), {"id": cluster_id, "status": ClusterStatus.ACTIVE})()
+    registry = _ClusterRegistry(existing=existing)
+    monkeypatch.setattr(dev_cli, "ClusterStore", _store_factory(object()))
     monkeypatch.setattr(dev_cli, "ExecutionTargetStore", _store_factory(object()))
-    monkeypatch.setattr(dev_cli, "ExecutionTargetRegistry", lambda _: target_registry)
-    monkeypatch.setattr(dev_cli, "ClusterRegistry", lambda *_: _ClusterRegistry([cluster]))
+    monkeypatch.setattr(dev_cli, "ClusterRegistry", lambda *_: registry)
 
     details = EnvironmentDetails(
         EnvironmentProvider.KIND,
@@ -621,14 +503,16 @@ async def test_register_environment_record_refreshes_existing_default_target(mon
 
     await _register_environment_record(details, "database")
 
-    assert target_registry.update_calls == [
+    assert registry.sync_update_calls == [
         {
-            "target_id": target.id,
+            "cluster_id": cluster_id,
             "updated_by": dev_cli.CLI_ACTOR_ID,
             "endpoint": details.endpoint,
             "api_key": details.api_key,
+            "namespace": details.namespace,
         }
     ]
+    assert registry.provision_calls == []
 
 
 @pytest.mark.asyncio
