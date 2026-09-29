@@ -158,10 +158,15 @@ class ClusterRegistry:
     ) -> Cluster:
         """Create a cluster and its sole default execution target from known values.
 
-        Unlike register(), bypasses discovery and provisions the target from
-        caller-supplied data. Raises if target creation fails, leaving the
-        cluster in ERROR state for operator recovery.
+        Idempotent against a DRAINING cluster of the same name: if one exists
+        it is reactivated with the new parameters rather than duplicated.
+        Raises if target creation fails, leaving the cluster in ERROR state
+        for operator recovery.
         """
+        existing = await self._store.get_by_name(name)
+        if existing is not None and existing.status is ClusterStatus.DRAINING:
+            return await self._reactivate(existing, endpoint, api_key, namespace, created_by, labels)
+
         cluster = await self._store.create(name, endpoint, api_key, created_by, labels)
         try:
             target = await self._execution_target_registry.create(
@@ -181,6 +186,34 @@ class ClusterRegistry:
             )
             raise
         return await self._store.record_discovery_state(cluster.id, ClusterStatus.ACTIVE, None, created_by)
+
+    async def _reactivate(
+        self,
+        cluster: Cluster,
+        endpoint: str,
+        api_key: str,
+        namespace: str,
+        updated_by: uuid.UUID,
+        labels: dict[str, Any] | None = None,
+    ) -> Cluster:
+        """Reactivate a DRAINING cluster and its default target with new parameters."""
+        reactivated = await self._store.reactivate(
+            cluster.id,
+            updated_by=updated_by,
+            endpoint=endpoint,
+            api_key=api_key,
+            labels=labels,
+        )
+        default_target = await self.get_default_target(cluster.id)
+        if default_target is not None:
+            await self._execution_target_registry.reactivate(
+                default_target.id,
+                updated_by=updated_by,
+                endpoint=endpoint,
+                api_key=api_key,
+                namespace=namespace,
+            )
+        return reactivated
 
     async def get_default_target(self, cluster_id: uuid.UUID) -> ExecutionTarget | None:
         """Return the default execution target for a cluster, or None if absent."""

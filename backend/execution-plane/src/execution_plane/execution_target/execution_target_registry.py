@@ -96,6 +96,24 @@ class ExecutionTargetRegistry:
             api_key=api_key,
         )
 
+    async def reactivate(
+        self,
+        target_id: uuid.UUID,
+        *,
+        updated_by: uuid.UUID,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        namespace: str | None = None,
+    ) -> ExecutionTarget:
+        """Re-enable a DRAINING target and transition it back to ACTIVE."""
+        return await self._store.reactivate(
+            target_id,
+            updated_by=updated_by,
+            endpoint=endpoint,
+            api_key=api_key,
+            namespace=namespace,
+        )
+
     async def _require_non_default(self, target_id: uuid.UUID) -> ExecutionTarget:
         """Return a target only if it is not the protected default target."""
         target = await self._store.get(target_id)

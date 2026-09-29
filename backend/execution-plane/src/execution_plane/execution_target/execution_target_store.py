@@ -215,6 +215,38 @@ class ExecutionTargetStore(StoreBase):
                 await session.rollback()
                 raise
 
+    async def reactivate(
+        self,
+        target_id: uuid.UUID,
+        *,
+        updated_by: uuid.UUID,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        namespace: str | None = None,
+    ) -> ExecutionTarget:
+        """Re-enable a DRAINING target and transition it back to ACTIVE."""
+        async with self._session_context() as session:
+            try:
+                target = await session.get(ExecutionTarget, target_id, with_for_update=True)
+                if target is None:
+                    raise ExecutionTargetNotFoundError(target_id)  # noqa: TRY301
+                target.enabled = True
+                target.status = TargetStatus.ACTIVE
+                target.status_message = None
+                if endpoint is not None:
+                    target.endpoint = endpoint
+                if api_key is not None:
+                    target.api_key = api_key
+                if namespace is not None:
+                    target.namespace = namespace
+                target.updated_by = updated_by
+                target.updated_at = datetime.now(UTC)
+                await session.commit()
+                return self._without_secret(target)
+            except Exception:
+                await session.rollback()
+                raise
+
     async def mark_failed(self, target_id: uuid.UUID, updated_by: uuid.UUID) -> ExecutionTarget:
         """Record an irrecoverable drain failure without exposing backend details."""
         async with self._session_context() as session:
