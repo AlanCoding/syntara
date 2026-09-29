@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from execution_plane.models.cluster import Cluster, ClusterStatus
+from execution_plane.models.execution_target import BackendType
 
 if TYPE_CHECKING:
     import uuid
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
     from execution_plane.cluster.cluster_store import ClusterStore
     from execution_plane.execution_target.execution_target_registry import ExecutionTargetRegistry
-    from execution_plane.models.execution_target import BackendType
+    from execution_plane.models.execution_target import ExecutionTarget
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,74 @@ class ClusterRegistry:
                 failures.append(target.name)
         status_message = f"Target registration failures: {', '.join(failures)}" if failures else None
         return await self._store.record_discovery_state(cluster.id, ClusterStatus.ACTIVE, status_message, created_by)
+
+    async def provision(
+        self,
+        name: str,
+        endpoint: str,
+        api_key: str,
+        namespace: str,
+        created_by: uuid.UUID,
+        labels: dict[str, Any] | None = None,
+    ) -> Cluster:
+        """Create a cluster and its sole default execution target from known values.
+
+        Unlike register(), bypasses discovery and provisions the target from
+        caller-supplied data. Raises if target creation fails, leaving the
+        cluster in ERROR state for operator recovery.
+        """
+        cluster = await self._store.create(name, endpoint, api_key, created_by, labels)
+        try:
+            target = await self._execution_target_registry.create(
+                cluster_id=cluster.id,
+                name=name,
+                backend_type=BackendType.OPENSHELL,
+                endpoint=endpoint,
+                api_key=api_key,
+                namespace=namespace,
+                is_default=True,
+                created_by=created_by,
+            )
+            await self._execution_target_registry.activate(target.id, created_by)
+        except Exception:
+            await self._store.record_discovery_state(
+                cluster.id, ClusterStatus.ERROR, "default target creation failed", created_by
+            )
+            raise
+        return await self._store.record_discovery_state(cluster.id, ClusterStatus.ACTIVE, None, created_by)
+
+    async def get_default_target(self, cluster_id: uuid.UUID) -> ExecutionTarget | None:
+        """Return the default execution target for a cluster, or None if absent."""
+        targets = await self._execution_target_registry.list(cluster_id=cluster_id)
+        return next((t for t in targets if t.is_default), None)
+
+    async def sync_update(
+        self,
+        cluster_id: uuid.UUID,
+        *,
+        updated_by: uuid.UUID,
+        name: str | None = None,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        namespace: str | None = None,
+    ) -> None:
+        """Update a cluster and its default execution target.
+
+        Only non-None fields are written. Operates via independent store
+        transactions; all changes must be idempotent against concurrent reads.
+        """
+        await self._store.update(cluster_id, updated_by=updated_by, name=name, endpoint=endpoint, api_key=api_key)
+        default_target = await self.get_default_target(cluster_id)
+        if default_target is None:
+            return
+        await self._execution_target_registry.update(
+            default_target.id,
+            updated_by=updated_by,
+            name=name,
+            endpoint=endpoint,
+            api_key=api_key,
+            namespace=namespace,
+        )
 
     async def get(self, cluster_id: uuid.UUID) -> Cluster | None:
         """Return a Cluster through the persistence boundary."""

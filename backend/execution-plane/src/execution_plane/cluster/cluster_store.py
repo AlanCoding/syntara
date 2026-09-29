@@ -89,6 +89,35 @@ class ClusterStore(StoreBase):
             result = await session.execute(statement)
             return [self._without_secret(cluster) for cluster in result.scalars().all()]
 
+    async def update(
+        self,
+        cluster_id: uuid.UUID,
+        *,
+        updated_by: uuid.UUID,
+        name: str | None = None,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+    ) -> Cluster:
+        """Update mutable cluster fields."""
+        async with self._session_context() as session:
+            try:
+                cluster = await session.get(Cluster, cluster_id, with_for_update=True)
+                if cluster is None:
+                    raise ClusterNotFoundError(cluster_id)  # noqa: TRY301
+                if name is not None:
+                    cluster.name = name
+                if endpoint is not None:
+                    cluster.endpoint = endpoint
+                if api_key is not None:
+                    cluster.api_key = api_key
+                cluster.updated_by = updated_by
+                cluster.updated_at = datetime.now(UTC)
+                await session.commit()
+                return self._without_secret(cluster)
+            except Exception:
+                await session.rollback()
+                raise
+
     async def record_discovery_state(
         self,
         cluster_id: uuid.UUID,

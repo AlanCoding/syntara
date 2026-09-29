@@ -686,10 +686,11 @@ class IntegrationService(UserReferenceResolverMixin, BaseService):
         labels["integration_id"] = str(integration.id)
         labels["integration_name"] = integration.name
 
-        await self._cluster_registry.register(
+        await self._cluster_registry.provision(
             name=integration.name,
             endpoint=integration.configuration.base_url,
             api_key=api_key,
+            namespace=integration.configuration.namespace,
             created_by=self.user.id,
             labels=labels,
         )
@@ -708,6 +709,53 @@ class IntegrationService(UserReferenceResolverMixin, BaseService):
             msg = f"Cluster '{integration.name}' not found; cannot delete integration"
             raise SafeValueError(msg)
         await self._cluster_registry.request_delete(cluster.id, self.user.id)
+
+    async def _sync_update_cluster(
+        self,
+        integration: Integration,
+        data: IntegrationUpdate,
+        old_name: str,
+    ) -> None:
+        """Propagate integration field changes to the cluster and its default target.
+
+        Only runs when cluster-relevant fields (name, configuration,
+        management_credential_id) are in the patch set.
+        """
+        if integration.integration_type != IntegrationType.OPENSHIFT or not self._cluster_registry:
+            return
+
+        relevant_fields = {"name", "configuration", "management_credential_id"}
+        if not (data.model_fields_set & relevant_fields):
+            return
+
+        if not isinstance(integration.configuration, OpenShiftConfiguration):
+            return
+
+        cluster = await self._cluster_registry.get_by_name(old_name)
+        if cluster is None:
+            msg = f"Cluster '{old_name}' not found; cannot update integration"
+            raise SafeValueError(msg)
+
+        api_key: str | None = None
+        if "management_credential_id" in data.model_fields_set and integration.management_credential_id:
+            resolved = await self._resolve_credential(integration.management_credential_id)
+            api_key = str(resolved.get("bearer_token") or resolved.get("token") or resolved.get("api_key") or "")
+            if not api_key:
+                msg = "Credential missing required authentication field (bearer_token, token, or api_key)"
+                raise SafeValueError(msg)
+
+        new_name = integration.name if "name" in data.model_fields_set else None
+        new_endpoint = integration.configuration.base_url if "configuration" in data.model_fields_set else None
+        new_namespace = integration.configuration.namespace if "configuration" in data.model_fields_set else None
+
+        await self._cluster_registry.sync_update(
+            cluster.id,
+            updated_by=self.user.id,
+            name=new_name,
+            endpoint=new_endpoint,
+            api_key=api_key,
+            namespace=new_namespace,
+        )
 
     async def update_integration(self, integration_id: UUID, data: IntegrationUpdate) -> IntegrationRead:
         """Apply partial updates to an integration."""
@@ -731,6 +779,7 @@ class IntegrationService(UserReferenceResolverMixin, BaseService):
             )
             await self.session.exec(stmt)
 
+        old_name = integration.name
         integration_name = data.name if data.name is not None else integration.name
         updated_fields = list(data.model_fields_set)
 
@@ -755,6 +804,9 @@ class IntegrationService(UserReferenceResolverMixin, BaseService):
                 )
             )
             await self._handle_integrity_error(e, integration_name)
+
+        # Sync cluster record before committing the integration change (hard dependency)
+        await self._sync_update_cluster(integration, data, old_name)
 
         await self.session.commit()
 

@@ -4,6 +4,7 @@ from uuid import UUID
 
 import pytest
 from execution_plane.models.cluster import Cluster
+from execution_plane.models.execution_target import ExecutionTarget, TargetStatus
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlmodel import col
@@ -49,9 +50,19 @@ class TestOpenShiftClusterSync:
         cluster = result.scalar_one_or_none()
         assert cluster is not None
         assert cluster.endpoint == "https://api.example.com:6443"
-        # Labels should contain integration_id
         assert cluster.labels.get("integration_id") == integration_id
         assert cluster.labels.get("integration_name") == "test-cluster-create"
+
+        # Verify a default ExecutionTarget was created with the right namespace
+        target_result = await test_db_session.execute(
+            select(ExecutionTarget).where(col(ExecutionTarget.cluster_id) == cluster.id)
+        )
+        target = target_result.scalar_one_or_none()
+        assert target is not None
+        assert target.is_default is True
+        assert target.namespace == "default"
+        assert target.endpoint == "https://api.example.com:6443"
+        assert target.status == TargetStatus.ACTIVE
 
     @pytest.mark.asyncio
     async def test_delete_openshift_integration_deletes_cluster(

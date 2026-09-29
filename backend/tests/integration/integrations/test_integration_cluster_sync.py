@@ -14,6 +14,7 @@ from syntara.core.services.secret_service import SecretService, create_secret_se
 from syntara.integrations.models.integration import (
     IntegrationCreate,
     IntegrationType,
+    IntegrationUpdate,
 )
 from syntara.integrations.services.integration_service import IntegrationService
 from tests.integration.helpers.credential import CredentialFactory
@@ -52,9 +53,10 @@ async def _make_bearer_credential(
 
 def _mock_registry() -> MagicMock:
     registry = MagicMock()
-    registry.register = AsyncMock(return_value=MagicMock())
+    registry.provision = AsyncMock(return_value=MagicMock())
     registry.get_by_name = AsyncMock(return_value=None)
     registry.request_delete = AsyncMock(return_value=MagicMock())
+    registry.sync_update = AsyncMock(return_value=None)
     return registry
 
 
@@ -92,11 +94,12 @@ class TestClusterSyncOnCreate:
         result = await service.create_integration(_openshift_create(credential_id=cred_id))
 
         assert result.name == "Test OpenShift"
-        registry.register.assert_called_once()
-        kw = registry.register.call_args[1]
+        registry.provision.assert_called_once()
+        kw = registry.provision.call_args[1]
         assert kw["name"] == "Test OpenShift"
         assert kw["endpoint"] == "https://openshift.example.com:6443"
         assert kw["api_key"] == "test-api-key"
+        assert kw["namespace"] == "syntara-workers"
         assert kw["created_by"] == test_user.id
         assert kw["labels"]["integration_name"] == "Test OpenShift"
 
@@ -140,10 +143,10 @@ class TestClusterSyncOnCreate:
         test_user: User,
         credential_factory: CredentialFactory,
     ) -> None:
-        """If registry.register raises, integration creation must also fail (hard dependency)."""
+        """If registry.provision raises, integration creation must also fail (hard dependency)."""
         cred_id, secret_service = await _make_bearer_credential(credential_factory)
         registry = _mock_registry()
-        registry.register = AsyncMock(side_effect=RuntimeError("Cluster sync failed"))
+        registry.provision = AsyncMock(side_effect=RuntimeError("Cluster sync failed"))
 
         service = IntegrationService(
             test_db_session, test_user, secret_service=secret_service, cluster_registry=registry
@@ -266,3 +269,131 @@ class TestClusterSyncOnDelete:
 
         with pytest.raises(ValueError, match="not found"):
             await service.delete_integration(result.id)
+
+
+class TestClusterSyncOnUpdate:
+    """Tests for cluster sync during integration updates."""
+
+    @pytest.mark.asyncio
+    async def test_openshift_update_namespace_syncs_cluster(
+        self,
+        test_db_session: AsyncSession,
+        test_user: User,
+        credential_factory: CredentialFactory,
+    ) -> None:
+        """Updating configuration (namespace) calls sync_update with the new namespace."""
+        cred_id, secret_service = await _make_bearer_credential(credential_factory)
+        mock_cluster = MagicMock()
+        mock_cluster.id = uuid4()
+        registry = _mock_registry()
+        registry.get_by_name = AsyncMock(return_value=mock_cluster)
+
+        service = IntegrationService(
+            test_db_session, test_user, secret_service=secret_service, cluster_registry=registry
+        )
+        result = await service.create_integration(_openshift_create(credential_id=cred_id))
+
+        patch = IntegrationUpdate(
+            configuration={
+                "integration_type": "openshift",
+                "base_url": "https://openshift.example.com:6443",
+                "namespace": "new-namespace",
+            }
+        )
+        await service.update_integration(result.id, patch)
+
+        registry.sync_update.assert_called_once()
+        kw = registry.sync_update.call_args[1]
+        assert kw["namespace"] == "new-namespace"
+        assert kw["endpoint"] == "https://openshift.example.com:6443"
+        assert kw["updated_by"] == test_user.id
+
+    @pytest.mark.asyncio
+    async def test_openshift_update_name_syncs_cluster(
+        self,
+        test_db_session: AsyncSession,
+        test_user: User,
+        credential_factory: CredentialFactory,
+    ) -> None:
+        """Updating name calls sync_update with the new name."""
+        cred_id, secret_service = await _make_bearer_credential(credential_factory)
+        mock_cluster = MagicMock()
+        mock_cluster.id = uuid4()
+        registry = _mock_registry()
+        registry.get_by_name = AsyncMock(return_value=mock_cluster)
+
+        service = IntegrationService(
+            test_db_session, test_user, secret_service=secret_service, cluster_registry=registry
+        )
+        result = await service.create_integration(_openshift_create(credential_id=cred_id))
+
+        patch = IntegrationUpdate(name="Renamed OpenShift")
+        await service.update_integration(result.id, patch)
+
+        registry.sync_update.assert_called_once()
+        kw = registry.sync_update.call_args[1]
+        assert kw["name"] == "Renamed OpenShift"
+
+    @pytest.mark.asyncio
+    async def test_openshift_update_irrelevant_field_does_not_sync(
+        self,
+        test_db_session: AsyncSession,
+        test_user: User,
+        credential_factory: CredentialFactory,
+    ) -> None:
+        """Updating description (not cluster-relevant) does not call sync_update."""
+        cred_id, secret_service = await _make_bearer_credential(credential_factory)
+        registry = _mock_registry()
+
+        service = IntegrationService(
+            test_db_session, test_user, secret_service=secret_service, cluster_registry=registry
+        )
+        result = await service.create_integration(_openshift_create(credential_id=cred_id))
+
+        patch = IntegrationUpdate(description="Updated description")
+        await service.update_integration(result.id, patch)
+
+        registry.sync_update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mcp_update_does_not_sync_cluster(
+        self,
+        test_db_session: AsyncSession,
+        test_user: User,
+    ) -> None:
+        """Updating a non-OpenShift integration never touches sync_update."""
+        registry = _mock_registry()
+        service = IntegrationService(test_db_session, test_user, cluster_registry=registry)
+
+        data = IntegrationCreate(
+            name="Test MCP",
+            integration_type=IntegrationType.MCP_SERVER,
+            configuration={"integration_type": "mcp_server", "base_url": "http://localhost:8080"},
+        )
+        result = await service.create_integration(data)
+
+        patch = IntegrationUpdate(name="Renamed MCP")
+        await service.update_integration(result.id, patch)
+
+        registry.sync_update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cluster_not_found_fails_integration_update(
+        self,
+        test_db_session: AsyncSession,
+        test_user: User,
+        credential_factory: CredentialFactory,
+    ) -> None:
+        """If cluster is not found during update, the update fails."""
+        cred_id, secret_service = await _make_bearer_credential(credential_factory)
+        registry = _mock_registry()
+        registry.get_by_name = AsyncMock(return_value=None)
+
+        service = IntegrationService(
+            test_db_session, test_user, secret_service=secret_service, cluster_registry=registry
+        )
+        result = await service.create_integration(_openshift_create(credential_id=cred_id))
+
+        patch = IntegrationUpdate(name="New Name")
+        with pytest.raises(ValueError, match="not found"):
+            await service.update_integration(result.id, patch)
