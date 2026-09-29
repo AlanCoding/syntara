@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol
 
+from ao_registration import register_integration_record
 from execution_plane.cluster.cluster_registry import (
     ClusterRegistration,
     ClusterRegistry,
@@ -29,21 +30,7 @@ from execution_plane.models.execution_target import BackendType
 from execution_plane.models.work_item import WorkItem
 from execution_plane.work_store import WorkStore
 from sqlalchemy import delete
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlmodel import col, select
-from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
-
-from syntara.authz.models import Project
-from syntara.core.services.secret_service import create_secret_service
-from syntara.credentials.models.credential import Credential
-from syntara.credentials.models.credential_type import CredentialType
-from syntara.integrations.models.integration import (
-    Integration,
-    IntegrationScope,
-    IntegrationStatus,
-    IntegrationType,
-)
-from syntara.integrations.models.integration_configuration import OpenShiftConfiguration
+from sqlmodel import col
 
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://admin:admin@localhost:5432/syntara_api"
 DEFAULT_LOCAL_NAMESPACE = "execution-plane"
@@ -337,87 +324,17 @@ class _CliDiscoveryMechanism:
         )
 
 
-async def _register_integration_record(details: EnvironmentDetails, database_url: str) -> None:
-    """Create or refresh the Credential and Integration for this environment."""
-    engine = create_async_engine(database_url)
-    try:
-        session_maker = async_sessionmaker(engine, class_=SQLModelAsyncSession, expire_on_commit=False)
-        async with session_maker() as session:
-            bearer_type = (
-                await session.exec(select(CredentialType).where(CredentialType.name == "HTTP Bearer Token"))
-            ).first()
-            if bearer_type is None:
-                raise EnvironmentSelectionError("'HTTP Bearer Token' credential type not found; run db-seed first")
-            default_project = (await session.exec(select(Project).where(col(Project.is_default).is_(True)))).first()
-            if default_project is None:
-                raise EnvironmentSelectionError("Default project not found; run db-seed first")
-
-            secret_service = create_secret_service(session)
-            credential_name = f"{details.name}-openshift-token"
-            existing_credential = (
-                await session.exec(
-                    select(Credential).where(
-                        Credential.name == credential_name,
-                        Credential.project_id == default_project.id,
-                    )
-                )
-            ).first()
-
-            if existing_credential is not None:
-                if existing_credential.secret_id is not None:
-                    await secret_service.update_secret(existing_credential.secret_id, {"token": details.api_key})
-                credential_id = existing_credential.id
-            else:
-                secret_id = await secret_service.create_secret({"token": details.api_key})
-                credential = Credential(
-                    name=credential_name,
-                    credential_type_id=bearer_type.id,
-                    secret_id=secret_id,
-                    project_id=default_project.id,
-                    enabled=True,
-                    created_by=CLI_ACTOR_ID,
-                    updated_by=CLI_ACTOR_ID,
-                    labels={},
-                )
-                session.add(credential)
-                await session.flush()
-                credential_id = credential.id
-
-            configuration = OpenShiftConfiguration(base_url=details.endpoint, namespace=details.namespace)
-            integration_name = f"{details.name}-openshift"
-            existing_integration = (
-                await session.exec(select(Integration).where(Integration.name == integration_name))
-            ).first()
-
-            if existing_integration is not None:
-                existing_integration.configuration = configuration
-                existing_integration.management_credential_id = credential_id
-                existing_integration.updated_by = CLI_ACTOR_ID
-                session.add(existing_integration)
-            else:
-                integration = Integration(
-                    name=integration_name,
-                    integration_type=IntegrationType.OPENSHIFT,
-                    management_credential_id=credential_id,
-                    configuration=configuration,
-                    scope=IntegrationScope.GLOBAL,
-                    validation_status=IntegrationStatus.UNKNOWN,
-                    enabled=True,
-                    created_by=CLI_ACTOR_ID,
-                    updated_by=CLI_ACTOR_ID,
-                    labels={},
-                )
-                session.add(integration)
-
-            await session.commit()
-    finally:
-        await engine.dispose()
-
-
 async def _register_environment_and_integration(details: EnvironmentDetails, database_url: str) -> None:
     """Register the Cluster/ExecutionTarget and then the Credential/Integration."""
     await _register_environment_record(details, database_url)
-    await _register_integration_record(details, database_url)
+    await register_integration_record(
+        name=details.name,
+        endpoint=details.endpoint,
+        namespace=details.namespace,
+        api_key=details.api_key,
+        actor_id=CLI_ACTOR_ID,
+        database_url=database_url,
+    )
 
 
 async def _register_environment_record(details: EnvironmentDetails, database_url: str) -> None:
