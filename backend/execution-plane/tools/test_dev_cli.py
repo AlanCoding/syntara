@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 from dev_cli import (
+    CLI_ACTOR_ID,
     CommandResult,
     EnvironmentDetails,
     EnvironmentProvider,
@@ -24,7 +25,9 @@ from dev_cli import (
     _collect_openshift_details,
     _find_registered_cluster,
     _refresh_registered_cluster,
+    _register_environment_and_integration,
     _register_environment_record,
+    _register_integration_record,
     _remove_environment_record,
     _remove_target_work_items,
     _require_active_registration,
@@ -653,3 +656,200 @@ async def test_remove_environment_record_deletes_targets_and_cluster(monkeypatch
     await _remove_environment_record(EnvironmentProvider.KIND, "execution-plane", "database")
 
     assert calls == ["request_cluster_delete", "finalize_delete", "finalize_delete"]
+
+
+# ---------------------------------------------------------------------------
+# _register_integration_record helpers
+# ---------------------------------------------------------------------------
+
+
+class _FakeResult:
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    def first(self) -> object:
+        return self._value
+
+
+class _SQLModelSession:
+    """Minimal async session stand-in for integration-record tests."""
+
+    def __init__(self, exec_results: list[object]) -> None:
+        self.exec_results = list(exec_results)
+        self.added: list[object] = []
+        self.flushed = 0
+        self.commits = 0
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+    async def exec(self, _statement: object) -> _FakeResult:
+        return _FakeResult(self.exec_results.pop(0) if self.exec_results else None)
+
+    def add(self, item: object) -> None:
+        self.added.append(item)
+
+    async def flush(self) -> None:
+        self.flushed += 1
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+
+class _FakeEngine:
+    async def dispose(self) -> None:
+        pass
+
+
+class _FakeSecretService:
+    def __init__(self, created_id: uuid.UUID) -> None:
+        self.created_id = created_id
+        self.create_calls: list[dict[str, object]] = []
+        self.update_calls: list[tuple[uuid.UUID, dict[str, object]]] = []
+
+    async def create_secret(self, fields: dict[str, object]) -> uuid.UUID:
+        self.create_calls.append(fields)
+        return self.created_id
+
+    async def update_secret(self, secret_id: uuid.UUID, fields: dict[str, object]) -> None:
+        self.update_calls.append((secret_id, fields))
+
+
+def _make_integration_details(
+    *,
+    endpoint: str = "https://api.example.com:6443",
+    namespace: str = "execution-plane",
+    api_key: str = "test-token",
+) -> EnvironmentDetails:
+    return EnvironmentDetails(
+        EnvironmentProvider.OPENSHIFT,
+        "dev-cluster",
+        endpoint,
+        namespace,
+        api_key,
+        {"provider": "openshift", "cluster": "dev-cluster"},
+    )
+
+
+def _fake_credential_type() -> object:
+    return type("CredentialType", (), {"id": uuid.uuid4(), "name": "HTTP Bearer Token"})()
+
+
+def _fake_project() -> object:
+    return type("Project", (), {"id": uuid.uuid4(), "name": "default", "is_default": True})()
+
+
+# ---------------------------------------------------------------------------
+# _register_integration_record tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_register_integration_record_creates_credential_and_integration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bearer_type = _fake_credential_type()
+    project = _fake_project()
+    session = _SQLModelSession([bearer_type, project, None, None])
+    secret_id = uuid.uuid4()
+    secret_service = _FakeSecretService(secret_id)
+
+    monkeypatch.setattr(dev_cli, "create_async_engine", lambda *_: _FakeEngine())
+    monkeypatch.setattr(dev_cli, "async_sessionmaker", lambda *_, **__: lambda: session)
+    monkeypatch.setattr(dev_cli, "create_secret_service", lambda _: secret_service)
+
+    await _register_integration_record(_make_integration_details(), "postgresql+asyncpg://localhost/syntara_api")
+
+    assert secret_service.create_calls == [{"token": "test-token"}]
+    assert session.commits == 1
+    added_types = {type(obj).__name__ for obj in session.added}
+    assert "Credential" in added_types
+    assert "Integration" in added_types
+
+
+@pytest.mark.asyncio
+async def test_register_integration_record_updates_existing_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bearer_type = _fake_credential_type()
+    project = _fake_project()
+    secret_id = uuid.uuid4()
+    existing_credential = type(
+        "Credential",
+        (),
+        {"id": uuid.uuid4(), "secret_id": secret_id, "name": "dev-cluster-openshift-token"},
+    )()
+    existing_integration = type(
+        "Integration",
+        (),
+        {
+            "name": "dev-cluster-openshift",
+            "configuration": None,
+            "management_credential_id": None,
+            "updated_by": None,
+        },
+    )()
+    session = _SQLModelSession([bearer_type, project, existing_credential, existing_integration])
+    secret_service = _FakeSecretService(uuid.uuid4())
+
+    monkeypatch.setattr(dev_cli, "create_async_engine", lambda *_: _FakeEngine())
+    monkeypatch.setattr(dev_cli, "async_sessionmaker", lambda *_, **__: lambda: session)
+    monkeypatch.setattr(dev_cli, "create_secret_service", lambda _: secret_service)
+
+    await _register_integration_record(
+        _make_integration_details(api_key="new-token"),
+        "postgresql+asyncpg://localhost/syntara_api",
+    )
+
+    assert secret_service.update_calls == [(secret_id, {"token": "new-token"})]
+    assert secret_service.create_calls == []
+    assert existing_integration.updated_by == CLI_ACTOR_ID
+    assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_register_integration_record_fails_when_bearer_token_type_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _SQLModelSession([None])
+    monkeypatch.setattr(dev_cli, "create_async_engine", lambda *_: _FakeEngine())
+    monkeypatch.setattr(dev_cli, "async_sessionmaker", lambda *_, **__: lambda: session)
+    monkeypatch.setattr(dev_cli, "create_secret_service", lambda _: _FakeSecretService(uuid.uuid4()))
+
+    with pytest.raises(EnvironmentSelectionError, match="db-seed"):
+        await _register_integration_record(_make_integration_details(), "postgresql+asyncpg://localhost/syntara_api")
+
+
+@pytest.mark.asyncio
+async def test_register_integration_record_fails_when_default_project_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bearer_type = _fake_credential_type()
+    session = _SQLModelSession([bearer_type, None])
+    monkeypatch.setattr(dev_cli, "create_async_engine", lambda *_: _FakeEngine())
+    monkeypatch.setattr(dev_cli, "async_sessionmaker", lambda *_, **__: lambda: session)
+    monkeypatch.setattr(dev_cli, "create_secret_service", lambda _: _FakeSecretService(uuid.uuid4()))
+
+    with pytest.raises(EnvironmentSelectionError, match="Default project not found"):
+        await _register_integration_record(_make_integration_details(), "postgresql+asyncpg://localhost/syntara_api")
+
+
+@pytest.mark.asyncio
+async def test_register_environment_and_integration_calls_both_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(dev_cli, "_register_environment_record", lambda *_: calls.append("env") or _noop())
+    monkeypatch.setattr(dev_cli, "_register_integration_record", lambda *_: calls.append("intg") or _noop())
+
+    details = _make_integration_details()
+    await _register_environment_and_integration(details, "database")
+
+    assert calls == ["env", "intg"]
+
+
+async def _noop() -> None:
+    """Async no-op for patching coroutine functions."""
