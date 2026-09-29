@@ -441,7 +441,7 @@ async def test_cli_cleanup_deletes_work_items_for_a_target() -> None:
     session = _Session()
 
     target_id = uuid.uuid4()
-    await _remove_target_work_items(_SessionStore(session), target_id)
+    await _remove_target_work_items(_SessionStore(session), target_id)  # type: ignore[arg-type]
 
     assert len(session.executed) == 1
     assert session.commits == 1
@@ -452,7 +452,7 @@ async def test_cli_cleanup_rolls_back_when_work_item_deletion_fails() -> None:
     session = _Session(execute_error=RuntimeError(_DATABASE_UNAVAILABLE))
 
     with pytest.raises(RuntimeError, match=_DATABASE_UNAVAILABLE):
-        await _remove_target_work_items(_SessionStore(session), uuid.uuid4())
+        await _remove_target_work_items(_SessionStore(session), uuid.uuid4())  # type: ignore[arg-type]
 
     assert session.rollbacks == 1
 
