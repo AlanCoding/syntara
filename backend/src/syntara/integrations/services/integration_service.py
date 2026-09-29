@@ -667,7 +667,7 @@ class IntegrationService(UserReferenceResolverMixin, BaseService):
 
         if not integration.management_credential_id:
             msg = "OpenShift integration requires a management credential"
-            raise ValueError(msg)
+            raise SafeValueError(msg)
 
         resolved_credential = await self._resolve_credential(integration.management_credential_id)
 
@@ -680,7 +680,7 @@ class IntegrationService(UserReferenceResolverMixin, BaseService):
         )
         if not api_key:
             msg = "Credential missing required authentication field (bearer_token, token, or api_key)"
-            raise ValueError(msg)
+            raise SafeValueError(msg)
 
         labels = dict(integration.labels or {})
         labels["integration_id"] = str(integration.id)
@@ -706,7 +706,7 @@ class IntegrationService(UserReferenceResolverMixin, BaseService):
         cluster = await self._cluster_registry.get_by_name(integration.name)
         if cluster is None:
             msg = f"Cluster '{integration.name}' not found; cannot delete integration"
-            raise ValueError(msg)
+            raise SafeValueError(msg)
         await self._cluster_registry.request_delete(cluster.id, self.user.id)
 
     async def update_integration(self, integration_id: UUID, data: IntegrationUpdate) -> IntegrationRead:
