@@ -154,6 +154,16 @@ make lint
 
 ### Execution Plane development
 
+The worker package and its image are maintained in the public
+[syntara-execution-plane repository](https://github.com/syntara-orchestration/syntara-execution-plane).
+The Syntara Python environment installs the EP package from a pinned Git revision.
+To build the local compose image, clone that repository beside this checkout, or
+set `EP_BUILD_CONTEXT` to its path.
+
+```bash
+git clone https://github.com/syntara-orchestration/syntara-execution-plane.git ../syntara-execution-plane
+```
+
 The Execution Plane development workflow uses the `dev_cli.py` tool through the
 `ep-dev-*` Make targets. It supports local Kind and Minikube clusters, or a
 remote OpenShift cluster. The cluster targets create or register the selected
@@ -319,15 +329,12 @@ and that `kubectl`/`oc` is authenticated to the intended environment.
 
 ### Execution-plane CI coverage
 
-Unit and combined test targets include `execution-plane/tests/`. CLI,
-integration, and E2E targets retain their own suites. Coverage reports and
-SonarCloud include `execution-plane/src/`, excluding generated migrations
-from coverage in the same way as the main backend.
-
-`make format`, `make lint`, and `make typecheck` include execution-plane source
-and tests. `make typecheck-pyrefly` checks its source alongside the main backend.
-The pre-commit workflow uses these shared targets. Static checks also inspect
-execution-plane API paths, dead code, imports, test structure, and migrations.
+The execution-plane package, worker tests, migrations, and image checks run in
+the `syntara-execution-plane` repository. Syntara retains the facade,
+authorization, integration, workflow-dispatch, and developer-tool tests. Its
+`make format`, `make lint`, and `make typecheck` targets cover Syntara-owned
+source only; end-to-end workflow fixtures apply the migration chain shipped
+inside the installed EP package.
 
 ### Database Setup
 
@@ -458,7 +465,7 @@ The `podman-compose.yml` defines the following services:
 | **temporal** | Temporal workflow engine | 7233 | `temporalio/auto-setup:1.25.1` |
 | **temporal-ui** | Temporal web UI (dev only) | 8081 | `temporalio/ui:2.31.2` |
 | **temporal-worker** | Temporal workflow worker | - | Built from `containers/syntara/Containerfile` |
-| **execution-plane-worker** | Execution Plane task worker | - | Built from `containers/execution-plane/Containerfile` |
+| **execution-plane-worker** | Execution Plane task worker | - | Built from the sibling `syntara-execution-plane` checkout |
 | **syntara** | Syntara API service | 8000 | Built from `containers/syntara/Containerfile` |
 | **syntara-ui** | Syntara web interface | 8080 | Built from `../frontend/packages/syntara-ui/Containerfile` |
 
@@ -734,7 +741,8 @@ If `APP_BASE_URL` is not set, the target automatically starts the database and d
 
 Workflow integration tests run a real execution-plane worker alongside the Temporal
 test server, using the same PostgreSQL testcontainer as the test. Database setup
-applies both the backend and execution-plane migrations. Processing starts after
+applies the backend migration chain and the migration chain bundled in the installed
+execution-plane package. Processing starts after
 each database restore and stops before teardown; completion callbacks use the test
 Temporal client. Automatic time skipping is disabled while this fixture is active
 so external script execution is not overtaken by activity timeouts.

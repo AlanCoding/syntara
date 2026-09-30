@@ -375,9 +375,8 @@ services:
 
   execution-plane-worker:
     build:
-      context: ./backend
+      context: ${EP_BUILD_CONTEXT:-../syntara-execution-plane}
       dockerfile: Containerfile
-      target: execution-plane
     image: ${EP_IMAGE:-localhost/execution-plane:latest}
     restart: unless-stopped
     environment:
