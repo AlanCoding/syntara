@@ -22,7 +22,7 @@ from execution_plane.models.work_item import WorkItem, WorkItemStatus
 from execution_plane.temporal_client import send_temporal_callback
 from execution_plane.work_store import WorkStore
 from execution_plane.worker_manager.base import WorkerManager
-from execution_plane.worker_manager.vanilla_k8s import (
+from execution_plane.worker_manager.vanilla_k8s.manager import (
     NodeExecutionError,
     RetryableDispatchError,
     VanillaK8sWorkerManager,
