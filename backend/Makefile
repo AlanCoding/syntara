@@ -660,7 +660,7 @@ verify-test-structure: ## Verify test directory structure matches source code do
 .PHONY: api-spec-drift
 api-spec-drift: ## Check that committed openapi.yaml matches the generated spec (VERBOSITY=-v/-vv/-vvv)
 	@echo "🔍 Checking OpenAPI spec is up to date..."
-	@uv run python tools/export_openapi.py 2>/dev/null | uv run python tools/ci/check_openapi_spec.py $(OPENAPI_SPEC) $(VERBOSITY)
+	@uv run python -m tools.export_openapi 2>/dev/null | uv run python tools/ci/check_openapi_spec.py $(OPENAPI_SPEC) $(VERBOSITY)
 
 .PHONY: api-spec-bundle
 api-spec-bundle: ## Bundle all domain sub-specs into a single merged openapi.yaml (no external $refs)
@@ -682,19 +682,19 @@ api-spec-bundle-public: ## Bundle public-facing spec (excludes internal endpoint
 .PHONY: api-spec-drift-public
 api-spec-drift-public: ## Check that committed public spec matches the generated spec
 	@echo "🔍 Checking public OpenAPI spec is up to date..."
-	@uv run python tools/export_openapi.py --public 2>/dev/null | uv run python tools/ci/check_openapi_spec.py $(OPENAPI_PUBLIC_SPEC) $(VERBOSITY)
+	@uv run python -m tools.export_openapi --public 2>/dev/null | uv run python tools/ci/check_openapi_spec.py $(OPENAPI_PUBLIC_SPEC) $(VERBOSITY)
 
 .PHONY: api-spec-bundle-ep
 api-spec-bundle-ep: ## Generate the Execution Plane OpenAPI spec from the FastAPI router
 	@echo "📦 Generating Execution Plane OpenAPI spec..."
-	@uv run python tools/export_openapi.py --execution-plane -o $(OPENAPI_EP_SPEC) 2>/dev/null
+	@uv run python -m tools.export_openapi --execution-plane -o $(OPENAPI_EP_SPEC) 2>/dev/null
 	@uv run pre-commit run yamlfmt --files $(OPENAPI_EP_SPEC) > /dev/null 2>&1 || true
 	@echo "✅ EP spec written to $(OPENAPI_EP_SPEC)"
 
 .PHONY: api-spec-drift-ep
 api-spec-drift-ep: ## Check that committed EP spec matches the generated spec (VERBOSITY=-v/-vv/-vvv)
 	@echo "🔍 Checking Execution Plane OpenAPI spec is up to date..."
-	@uv run python tools/export_openapi.py --execution-plane 2>/dev/null | uv run python tools/ci/check_openapi_spec.py $(OPENAPI_EP_SPEC) $(VERBOSITY)
+	@uv run python -m tools.export_openapi --execution-plane 2>/dev/null | uv run python tools/ci/check_openapi_spec.py $(OPENAPI_EP_SPEC) $(VERBOSITY)
 
 .PHONY: api-spec-bundle-all
 api-spec-bundle-all: api-spec-bundle api-spec-bundle-public api-spec-bundle-ep ## Bundle both full and public specs, and regenerate EP spec
