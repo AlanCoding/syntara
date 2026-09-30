@@ -22,6 +22,48 @@ from syntara.workflows.workflow_engine.models.workflow_definition import (
     ScriptExecutorParameters,
 )
 
+# Workflow node type dispatched by this activity. The Execution Plane worker is
+# node-type agnostic; the image reference below is what makes the pod a "script" node.
+_NODE_TYPE = "script"
+
+# Fallback caps when the node config omits engine-injected limits.
+_DEFAULT_TIMEOUT_SECONDS = 300
+_DEFAULT_MAX_OUTPUT_BYTES = 1_048_576
+
+
+def _build_invocation(input_config: dict[str, Any], settings: Any) -> dict[str, Any]:  # noqa: ANN401
+    """Assemble the full node invocation envelope for the cold-start pod.
+
+    Per the EP integration design, the AO activity (not the EP worker) owns
+    envelope construction and image selection; the EP worker manager stays
+    node-type agnostic and only creates the pod and maps its result. The shape
+    here matches the synchronous node-container path so a single SDK node image
+    serves both the sync (Temporal-activity) and async (EP) execution routes.
+
+    Script nodes carry no resolved credentials, so ``credentials.resolved`` is
+    empty; the ``settings`` block still ships the generic node settings the SDK
+    expects.
+    """
+    return {
+        "version": 1,
+        "operation": "execute",
+        # Underscore-prefixed keys are engine routing/limits, not node inputs.
+        "inputs": {key: value for key, value in input_config.items() if not key.startswith("_")},
+        "credentials": {"resolved": {}},
+        "workflow_context": {
+            "workflow_id": activity.info().workflow_id,
+            "activity_id": activity.info().activity_id,
+        },
+        "settings": {
+            "workflow_http_request_allowed_hosts": settings.workflow_http_request_allowed_hosts,
+            "aap_poll_interval_seconds": settings.aap_poll_interval_seconds,
+        },
+        "timeout_seconds": int(
+            input_config.get("_engine_timeout_seconds", input_config.get("timeout", _DEFAULT_TIMEOUT_SECONDS))
+        ),
+        "max_output_bytes": int(input_config.get("_engine_max_output_bytes", _DEFAULT_MAX_OUTPUT_BYTES)),
+    }
+
 
 async def _dispatch_to_te(
     input_config: dict[str, Any],
@@ -33,23 +75,41 @@ async def _dispatch_to_te(
     This function writes directly to the execution_plane DB schema instead of
     calling an HTTP API. When the EP worker becomes a standalone service, this
     becomes POST /api/execution_plane/v1/submit with the same payload.
+
+    MVP SHORTCUT (secrets at rest): the invocation envelope — including node
+    inputs — is persisted in ``work_items.payload`` in plaintext. Script nodes
+    carry no credentials today, but node types that do (aap_*, agentic) must not
+    reuse this path until payloads are encrypted or credentials are resolved by
+    the EP worker at dispatch time. See followup in
+    docs/execution-plane/integration.md.
     """
+    settings = get_settings()
+
+    image = settings.node_container_images.get(_NODE_TYPE)
+    if not image:
+        msg = f"No Execution Plane container image configured for node type '{_NODE_TYPE}'"
+        raise ApplicationError(msg, type="ConfigError", non_retryable=True)
+
     task_token_bytes: bytes = activity.info().task_token
     task_token_b64 = base64.b64encode(task_token_bytes).decode("ascii")
     correlation_id_str = activity.info().workflow_id
-
-    settings = get_settings()
 
     try:
         work_correlation_id = uuid.UUID(correlation_id_str) if correlation_id_str else uuid.uuid4()
     except ValueError:
         work_correlation_id = uuid.uuid4()
 
+    payload = {
+        "invocation": _build_invocation(input_config, settings),
+        "image": image,
+        "output_config": output_config,
+    }
+
     async with WorkStore(settings.database_url.render_as_string(hide_password=False), poolclass=NullPool) as store:
         work_item = await store.dispatch(
             activity_handle=task_token_b64,
             work_correlation_id=work_correlation_id,
-            payload={"input_config": input_config, "output_config": output_config},
+            payload=payload,
         )
     activity.logger.info("Dispatched work item to TE work_item_id=%s", work_item.id)
 

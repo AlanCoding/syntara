@@ -99,6 +99,7 @@ dev = [
     "types-python-dateutil>=2.8.0",  # type stubs for python-dateutil
     "psutil>=5.9.0",  # for memory monitoring in performance tests
     "scikit-learn-stubs>=0.0.3",  # type stubs for scikit-learn
+    "grpc-stubs>=1.53.0.6",  # type stubs for grpc (vendored node_protocol client)
     "openapi-python-client>=0.28.3,<0.29.0",  # for API client code generation. 0.29+ requires typer<0.27, conflicts with our typer>=0.27.0
     "moto[s3]>=5.0.0",  # for S3 mock testing
     "boto3-stubs[s3]>=1.35.0",  # type stubs for boto3 S3
@@ -164,6 +165,8 @@ only-include = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+# Generated protobuf/gRPC stubs (vendored node_protocol) are machine-authored; do not lint.
+extend-exclude = ["*_pb2.py", "*_pb2.pyi", "*_pb2_grpc.py", "*_pb2_grpc.pyi"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -246,6 +249,8 @@ bad-return = "warn"
 # MyPy configuration
 [tool.mypy]
 python_version = "3.12"
+# Generated protobuf/gRPC stubs (vendored node_protocol) are machine-authored; do not type-check.
+exclude = ['.*_pb2\.pyi?$', '.*_pb2_grpc\.pyi?$']
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

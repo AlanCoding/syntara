@@ -1503,6 +1503,16 @@ class WorkflowEngineSettings(BaseSettings):
         description="Enable Script node execution in workflows (Developer Preview)",
     )
 
+    # Cold-start Execution Plane node dispatch: the AO activity selects the
+    # container image per node type and writes it into the WorkItem payload; the
+    # EP worker creates a fresh pod from that reference. Keys are workflow node
+    # types (e.g. "script"); values are fully-qualified, immutable image refs the
+    # target cluster can pull (e.g. "localhost:5001/syntara-node-script:dev").
+    node_container_images: dict[str, str] = Field(
+        default_factory=dict,
+        description="Node type to immutable container image reference for Execution Plane dispatch",
+    )
+
     agent_orchestrator_base_url: HttpUrl = Field(  # type: ignore[assignment]
         default="http://localhost:8000/api/v1",
         description="Base URL for Agent Orchestrator API",
