@@ -33,7 +33,7 @@ from syntara.api.constants import (
     API_V1_PATH_PREFIX,
     API_V1_VERSION,
 )
-from syntara.api.execution_plane_router import router as ep_router
+from syntara.api.execution_plane_facade import router as ep_router
 from syntara.audit.lifecycle import start_audit_subsystems, stop_audit_subsystems
 from syntara.audit.middleware import AuditMiddleware
 from syntara.audit.registration import discover_and_register_all_handlers
