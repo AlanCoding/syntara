@@ -103,8 +103,8 @@ async def send_temporal_callback(item: WorkItem, *, client: Client | None = None
             await handle.complete(item.result or {})
         else:
             result = item.result or {}
-            error_msg = result.get("error", "Script execution failed")
-            error_type = result.get("error_type", "ScriptExecutionError")
+            error_msg = result.get("error", "Node execution failed")
+            error_type = result.get("error_type", "NodeExecutionError")
             await handle.fail(ApplicationError(error_msg, type=error_type, non_retryable=True))
     except RPCError as e:
         if e.status == RPCStatusCode.NOT_FOUND:

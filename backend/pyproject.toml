@@ -99,6 +99,7 @@ dev = [
     "types-python-dateutil>=2.8.0",  # type stubs for python-dateutil
     "psutil>=5.9.0",  # for memory monitoring in performance tests
     "scikit-learn-stubs>=0.0.3",  # type stubs for scikit-learn
+    "grpc-stubs>=1.53.0.6",  # type stubs for grpc (vendored node_protocol client)
     "openapi-python-client>=0.28.3,<0.29.0",  # for API client code generation. 0.29+ requires typer<0.27, conflicts with our typer>=0.27.0
     "moto[s3]>=5.0.0",  # for S3 mock testing
     "boto3-stubs[s3]>=1.35.0",  # type stubs for boto3 S3
@@ -164,6 +165,8 @@ only-include = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+# Generated protobuf/gRPC stubs (vendored node_protocol) are machine-authored; do not lint.
+extend-exclude = ["*_pb2.py", "*_pb2.pyi", "*_pb2_grpc.py", "*_pb2_grpc.pyi"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -208,8 +211,10 @@ ignore = [
 "execution-plane/src/execution_plane/migrations/**/*.py" = ["INP001", "D400", "D415", "PLR0915"]
 "execution-plane/tools/dev_cli.py" = ["EM101", "EM102", "FBT001", "INP001", "T201", "TRY003", "TRY301"]
 "execution-plane/tools/ao_registration.py" = ["EM101", "INP001", "TC003", "TRY003", "D413"]
+"execution-plane/tools/register_kind_sa_target.py" = ["EM101", "INP001", "T201", "TRY003", "TC003"]
 "execution-plane/tools/test_dev_cli.py" = ["D102", "D103", "D101", "D107", "INP001", "S101"]
 "execution-plane/tools/test_ao_registration.py" = ["D102", "D103", "D101", "D107", "INP001", "S101"]
+"execution-plane/tools/test_register_kind_sa_target.py" = ["D102", "D103", "D101", "D107", "INP001", "S101"]
 "tests/performance/conftest.py" = ["E402"]  # pytest_plugins must precede imports
 "src/syntara/api/repositories/*.py" = ["ANN401"]  # Allow Any for database row types
 "src/syntara/core/database/migrations/**/*.py" = ["INP001", "D400", "D415", "PLR0915"]  # Alembic files (auto-generated)
@@ -228,7 +233,7 @@ python-version = "3.12.0"
 project-includes = ["src", "execution-plane/src", "execution-plane/tools"]
 # Editable installs are otherwise inferred as third-party directories and skipped.
 disable-project-excludes-heuristics = true
-project-excludes = ["**/__pycache__", "**/node_modules", ".venv/**", "src/api_client", "src/cli", "test-sdk/src", "execution-plane/tools/dev_cli.py", "execution-plane/tools/ao_registration.py", "execution-plane/tools/test_dev_cli.py", "execution-plane/tools/test_ao_registration.py"]
+project-excludes = ["**/__pycache__", "**/node_modules", ".venv/**", "src/api_client", "src/cli", "test-sdk/src", "execution-plane/tools/dev_cli.py", "execution-plane/tools/ao_registration.py", "execution-plane/tools/register_kind_sa_target.py", "execution-plane/tools/test_dev_cli.py", "execution-plane/tools/test_ao_registration.py", "execution-plane/tools/test_register_kind_sa_target.py"]
 
 # SQLModel/SQLAlchemy stubs cause false positives for these rules.
 # unbound-name and bad-return have a few false positives in existing code
@@ -246,6 +251,8 @@ bad-return = "warn"
 # MyPy configuration
 [tool.mypy]
 python_version = "3.12"
+# Generated protobuf/gRPC stubs (vendored node_protocol) are machine-authored; do not type-check.
+exclude = ['.*_pb2\.pyi?$', '.*_pb2_grpc\.pyi?$']
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

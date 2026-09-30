@@ -1,0 +1,37 @@
+---
+# Cold-start Execution Plane demo override (AAP-93615).
+#
+# Layers the kind-cluster wiring onto the base full-stack compose WITHOUT changing
+# the default dev stack. The base podman-compose.yml must stay runnable for people
+# who have no kind cluster, so the external `kind` network and the self-signed-cert
+# opt-out live here instead.
+#
+# Prereqs (see backend/docs/execution-plane/kind-demo-runbook.md):
+#   1. A kind cluster named `execution-plane` exists (creates the `kind` podman
+#      network and the `execution-plane-control-plane` container this file targets).
+#   2. The script node image is loaded into that cluster.
+#   3. A default VANILLA_K8S ExecutionTarget points at
+#      https://execution-plane-control-plane:6443 with a ServiceAccount token.
+#
+# Run with:
+#   uv run podman-compose -p syntara \
+#     -f ../podman-compose.yml -f ../podman-compose.kind-demo.override.yml \
+#     up -d syntara temporal-worker execution-plane-worker
+services:
+  execution-plane-worker:
+    # Join the kind podman network so the API-server hostname resolves in-container.
+    networks:
+      - default
+      - kind
+    environment:
+      # kind's API server presents a self-signed cert with no CA on the target;
+      # opt out of verification for this local demo (EPSettings.node_k8s_verify_ssl,
+      # env var is un-prefixed — see execution-plane/src/execution_plane/config.py).
+      - NODE_K8S_VERIFY_SSL=false
+
+networks:
+  # Re-declare the project default so podman-compose keeps the EP worker on it
+  # (for database/temporal DNS) alongside the external kind network.
+  default: {}
+  kind:
+    external: true

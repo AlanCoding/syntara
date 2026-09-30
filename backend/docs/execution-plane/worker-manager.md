@@ -1,6 +1,10 @@
 # Execution Plane: Worker Manager
 
-*(Not yet implemented — the Protocol interface is defined; no concrete backend implementation exists.)*
+*(This document describes the full target design. A cold-start MVP for the
+Vanilla Kubernetes backend has shipped — `VanillaK8sWorkerManager` — with
+several deliberate shortcuts. See
+[cold-start-node-dispatch.md](cold-start-node-dispatch.md) for what is actually
+implemented today and the followups that close the gap to this design.)*
 
 The Worker Manager submits a request to a cluster's API to run a `WorkItem` in an
 `ExecutionTarget` — abstractly, a cold or warm worker pool in that cluster. It knows how

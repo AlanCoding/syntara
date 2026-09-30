@@ -102,6 +102,28 @@ class WorkStore(StoreBase):
                 await session.rollback()
                 raise
 
+    async def requeue(self, item_id: uuid.UUID) -> WorkItem:
+        """Return a claimed item to PENDING after a retryable dispatch failure.
+
+        Clears the target assignment so a later claim can pick a different target.
+        Does NOT pg_notify: the poll loop's own interval provides the retry cadence,
+        and an immediate notify would defeat the caller's backoff. Per-item attempt
+        counting and a not-before timestamp are future work (needs a schema column).
+        """
+        async with self._session_context() as session:
+            try:
+                item = await session.get(WorkItem, item_id)
+                if item is None:
+                    raise WorkItemNotFoundError(item_id)  # noqa: TRY301
+                item.status = WorkItemStatus.PENDING
+                item.execution_target_id = None
+                item.claimed_at = None
+                await session.commit()
+                return item
+            except Exception:
+                await session.rollback()
+                raise
+
     async def set_result(
         self,
         item_id: uuid.UUID,

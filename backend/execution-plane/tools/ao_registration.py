@@ -18,6 +18,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from syntara.authz.models import Project
+from syntara.core.models.user import User
 from syntara.core.services.secret_service import create_secret_service
 from syntara.credentials.models.credential import Credential
 from syntara.credentials.models.credential_type import CredentialType
@@ -28,6 +29,24 @@ from syntara.integrations.models.integration import (
     IntegrationType,
 )
 from syntara.integrations.models.integration_configuration import OpenShiftConfiguration
+
+_NIL_ACTOR_ID = uuid.UUID(int=0)
+_BOOTSTRAP_ADMIN_USERNAME = "admin"
+
+
+async def _resolve_actor_id(session: SQLModelAsyncSession, actor_id: uuid.UUID) -> uuid.UUID:
+    """Map the CLI's nil UUID onto the seeded bootstrap admin principal.
+
+    ``credentials.created_by`` / ``integrations.created_by`` FK to ``principals``.
+    The Execution Plane CLI historically passed ``uuid.UUID(int=0)``, which is
+    not a real principal.
+    """
+    if actor_id != _NIL_ACTOR_ID:
+        return actor_id
+    admin = (await session.exec(select(User).where(User.username == _BOOTSTRAP_ADMIN_USERNAME))).first()
+    if admin is None:
+        raise RuntimeError("Bootstrap admin user not found; run db-seed first")
+    return admin.id
 
 
 async def register_integration_record(
@@ -61,6 +80,8 @@ async def register_integration_record(
             default_project = (await session.exec(select(Project).where(col(Project.is_default).is_(True)))).first()
             if default_project is None:
                 raise RuntimeError("Default project not found; run db-seed first")
+
+            actor_id = await _resolve_actor_id(session, actor_id)
 
             secret_service = create_secret_service(session)
             credential_name = f"{name}-openshift-token"
