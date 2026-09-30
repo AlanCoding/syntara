@@ -118,6 +118,10 @@ Mint a long-lived token for the SA and save it:
 kubectl create token syntara-dispatcher -n execution-plane --duration=720h > /tmp/sa-token.txt
 ```
 
+> The cluster may cap the lifetime below what you request (the API server's
+> `--service-account-max-token-expiration`); kind honored 720h here (30 days). If
+> the token expires, re-mint it and re-run Step 4 to update the target's `api_key`.
+
 Sanity-check the token authenticates (should print "No resources found", i.e.
 authenticated + authorized, not a 403):
 
@@ -201,14 +205,39 @@ TOKEN=$(curl -sk -X POST "$BASE/api/v1/auth/login" -H "Content-Type: application
   -d "{\"username\":\"admin\",\"password\":\"$PW\"}" | jq -r .access_token)   # expires ~15 min
 ```
 
-Create a workflow whose only node is a script node echoing `hello world`
-(project + workflow + version). Then create an execution. `ExecutionCreate`
-requires both `workflow_id` and `trigger_node_id` (the script node's id):
+Create the workflow in a single `POST /workflows` — the request carries the full
+`workflow_definition` (a manual trigger → one script node that echoes
+`hello world`) and the backend creates version 1 for you. Grab the seeded default
+project first:
+
+```bash
+PROJ=$(curl -sk "$BASE/api/v1/projects" -H "Authorization: Bearer $TOKEN" | jq -r '.resources[0].id')
+
+WF=$(curl -sk -X POST "$BASE/api/v1/workflows" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d "{
+    \"name\": \"hello-world-demo\",
+    \"description\": \"Cold-start EP: single script node echoing hello world\",
+    \"project_id\": \"$PROJ\",
+    \"workflow_definition\": {
+      \"name\": \"hello-world-demo\",
+      \"schema_version\": \"2.0.0\",
+      \"triggers\": [{\"id\": \"trigger\", \"type\": \"manual_trigger\", \"parameters\": {}}],
+      \"nodes\": [{\"id\": \"script_node\", \"name\": \"Hello Script\", \"type\": \"script\",
+                   \"parameters\": {\"code\": \"echo 'hello world'\", \"language\": \"bash\"}}],
+      \"edges\": [{\"from\": \"trigger\", \"to\": \"script_node\"}]
+    }
+  }" | jq -r .id)
+echo "workflow: $WF"
+```
+
+Then create an execution. `ExecutionCreate` requires `workflow_id` and
+`trigger_node_id` — the latter is the **trigger** id (`"trigger"`), the entry
+point to start from, *not* the script node id:
 
 ```bash
 EXEC=$(curl -sk -X POST "$BASE/api/v1/executions" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"workflow_id\":\"<WORKFLOW_ID>\",\"trigger_node_id\":\"<SCRIPT_NODE_ID>\",\"input_data\":{}}" \
+  -d "{\"workflow_id\":\"$WF\",\"trigger_node_id\":\"trigger\",\"input_data\":{}}" \
   | jq -r .id)
 
 # poll

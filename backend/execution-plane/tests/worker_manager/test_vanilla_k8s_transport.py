@@ -19,7 +19,7 @@ from execution_plane.worker_manager.vanilla_k8s.transport import TransportError,
 from kubernetes.client.exceptions import ApiException
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 _IDENTITY = "wi-xyz"
 
@@ -139,12 +139,18 @@ class _FakeChannel:
         return None
 
 
-def _install_happy_transport(monkeypatch: pytest.MonkeyPatch, api: _FakeApi, invoke_result: dict[str, Any]) -> None:
+def _install_happy_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    api: _FakeApi,
+    invoke_result: dict[str, Any],
+    *,
+    configuration: Callable[[], object] | None = None,
+    api_client: type = _FakeApiClient,
+) -> None:
     fake_client = SimpleNamespace(
-        Configuration=lambda: SimpleNamespace(
-            host=None, api_key={}, api_key_prefix={}, verify_ssl=True, ssl_ca_cert=None
-        ),
-        ApiClient=_FakeApiClient,
+        Configuration=configuration
+        or (lambda: SimpleNamespace(host=None, api_key={}, api_key_prefix={}, verify_ssl=True, ssl_ca_cert=None)),
+        ApiClient=api_client,
         CoreV1Api=lambda _api_client: api,
     )
     monkeypatch.setattr(transport_module, "client", fake_client)
@@ -256,3 +262,52 @@ class TestRunPod:
         with pytest.raises(TransportError) as exc_info:
             _run(api)
         assert "secret-cluster-detail" not in str(exc_info.value)
+
+    def test_api_exception_message_surfaces_safe_status_code(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Regression: a 403 (e.g. a rejected/anonymous auth header) must be
+        # distinguishable in the work-item result — the status code is safe to
+        # surface even though the remote reason/body must stay hidden.
+        api = _FakeApi()
+        api.create_error = ApiException(status=403, reason="secret-cluster-detail")
+        _install_happy_transport(monkeypatch, api, {"result": {}})
+        with pytest.raises(TransportError) as exc_info:
+            _run(api)
+        assert "403" in str(exc_info.value)
+        assert "secret-cluster-detail" not in str(exc_info.value)
+
+
+class TestAuthConfiguration:
+    """The bearer token must reach the API server as ``Authorization: Bearer <token>``.
+
+    Regression for the kubernetes Python client v36 auth-scheme rename: its
+    backward-compat shim reads the token from the legacy ``authorization`` key but
+    resolves the prefix only under ``BearerToken``, so a prefix set under
+    ``authorization`` alone is silently dropped and the API server treats the
+    request as anonymous (kubernetes-client/python#2595). The happy-path lifecycle
+    tests fake ``Configuration`` away, so this test drives the *real* one.
+    """
+
+    def test_bearer_prefix_is_applied_to_the_real_configuration(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from kubernetes import client as real_client
+
+        captured: dict[str, Any] = {}
+
+        class _CapturingApiClient(_FakeApiClient):
+            def __init__(self, config: object) -> None:
+                captured["config"] = config
+                super().__init__(config)
+
+        api = _FakeApi()
+        _install_happy_transport(
+            monkeypatch,
+            api,
+            {"result": {}},
+            configuration=real_client.Configuration,
+            api_client=_CapturingApiClient,
+        )
+        _run(api)
+
+        config = captured["config"]
+        # `_target()` sets token="super-secret-token"; the emitted header must carry
+        # the Bearer scheme, not the raw token.
+        assert config.auth_settings()["BearerToken"]["value"] == "Bearer super-secret-token"

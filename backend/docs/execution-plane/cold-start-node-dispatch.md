@@ -196,13 +196,107 @@ available for installers shipping a custom image. `script_nodes_enabled` stays
 `False` by default (security gate); only per-environment config (like the dev
 compose) enables it.
 
+### 10. Script nodes have almost no environment surface — and no secrets at all
+
+**Shortcut.** A script node's entire input model
+(`ScriptExecutorParameters`, `workflow_engine/models/workflow_definition.py`) is
+three fields: `language` (`bash` | `python`), `code`, and `environment`
+(`dict[str, str]` of env vars). There is **no** field for secrets/credentials,
+working directory, resource requests/limits, per-node timeout (that lives on the
+separate `NodeSettingsNoRetry.timeout`), network/proxy config, package installs,
+or interpreter/version selection beyond the two languages.
+
+Of the environment surface that *does* exist, only plain env vars flow, and they
+flow **over the gRPC invocation, not the pod spec**. `ep_dispatch_activity.
+_build_invocation()` puts `environment` inside the envelope's `inputs`
+(`inputs.environment`) and hard-codes `credentials.resolved = {}`; the in-container
+node runtime (out-of-tree, PR #701) is what must read `inputs.environment` and
+apply it. `pod_body()` deliberately wires **no** `env`, `envFrom`, secret volume,
+or credential mount onto the container — only a memory `tmp` emptyDir and the
+optional `agent-tls` transport cert. So: env vars are delivered but untested
+end-to-end here (no in-tree runtime to apply them), and **secrets are not plumbed
+for script nodes anywhere**.
+
+**Why acceptable for MVP.** The demo goal is a single `echo` with no inputs and
+no secrets. Script nodes are the only wired type and carry no credentials, so an
+empty `credentials.resolved` is correct today (this is the flip side of shortcut
+1 — nothing sensitive is stored because nothing sensitive is passed).
+
+**Followup shape (a large, separate work item — likely its own epic story, not a
+`node_container_images` line-item).** To make script nodes production-useful:
+
+1. **Env vars, verified end-to-end.** Once the SDK runtime lands (shortcut 9),
+   add a test that a workflow-set `environment` actually reaches the process
+   (`os.environ`) in the pod. No API change — just close the untested gap.
+2. **Secrets/credentials.** This is the big one. `ScriptExecutorParameters` needs
+   a credential/secret reference field, and script must be routed through the
+   existing workflow-time credential resolver
+   (`dynamic_workflow._resolve_and_inject_credentials` →
+   `resolve_workflow_credentials` activity → `_resolved_credentials`; today script
+   is deliberately excluded from `_REFERENCE_BEARING_NODE_TYPES`). Then
+   `_build_invocation` must populate `credentials.resolved` from that instead of
+   `{}` — **and** the plaintext-`work_items.payload` problem (shortcut 1) must be
+   solved first, or resolved secrets land in the DB in the clear. The node runtime
+   must then materialize `credentials.resolved` inside the container (as env or
+   files) with scrubbing on the way back out (the credential codec/interceptor
+   machinery already exists for other node types).
+3. **Resource limits / node settings.** Per-node CPU/memory (today `pod_body`
+   hard-codes requests/limits) and possibly working directory — surface them on
+   the node model and map them in `pod_body`. This overlaps shortcut 5's
+   per-target metadata refactor.
+
+The cleanest boundary decision to make up front: secrets travel on the gRPC
+`credentials_json` channel (like other node types), **not** as Kubernetes pod env
+or Secret objects — so this work is about the resolver + envelope + runtime, not
+about adding `env`/`envFrom` to `pod_body`.
+
 ---
 
-## Deliberately *not* abstracted
+## Transport evolution: from port-forward to production
 
-No receptor/transport indirection layer was introduced. The transport is a
-direct Kubernetes port-forward + gRPC call (`transport.py` → `forward.py` →
-`node_protocol.client.invoke`). If a second transport (e.g. receptor) is ever
-needed, introduce the seam at that point against two concrete implementations —
-not speculatively now. There is no followup to file for this; it is a note so a
-future reader does not re-add a premature interface.
+The MVP's data path is a **Kubernetes API-server port-forward** wrapped in a
+loopback bridge: `transport.py` → `forward.py` → `node_protocol.client.invoke`,
+with `grpc.insecure_channel` dialing a `127.0.0.1` listener whose bytes are pumped
+through `connect_get_namespaced_pod_portforward`. That exists for one reason: the
+EP worker runs **outside** the execution cluster (a compose container talking to
+kind), and a port-forward is the only way an outside process reaches a pod — every
+byte is proxied through the kube-apiserver → kubelet → pod.
+
+This is fine for local dev and bootstrap but is **not** the production data path.
+Three problems at any real scale: (a) it routes all node I/O through the
+control-plane apiserver (a component sized for control traffic, with in-flight and
+streaming limits, and the ongoing SPDY→WebSocket migration); (b) `pods/portforward`
+is a broad grant (a socket into any pod in the namespace); (c) the channel is
+`insecure` — confidentiality leans entirely on the apiserver tunnel, and the
+per-call Python bridge is a throughput/reliability bottleneck that pairs with the
+serial-dispatch shortcut (7).
+
+There are two phases to plan, and they are **not** the same scope:
+
+**Near-term (single cluster, in-between — next phase of ANSTRAT-1803).** Support
+exactly **one** K8s cluster and get off the apiserver port-forward by giving the
+EP worker direct pod reachability. The likely shape: **co-locate the EP worker
+inside the execution cluster** (run it as a Deployment) and reach the node over a
+`Service` / pod IP, or an equivalent single-cluster network shortcut. At that
+point the port-forward and the loopback bridge (`forward.py`) can go away, and the
+`agent-tls` secret already scaffolded in `pod_body` becomes the basis for **mTLS
+gRPC straight to the pod** (replacing `insecure_channel`). This is deliberately
+scoped to one cluster — no cross-cluster routing, no mesh.
+
+**Production (multi-cluster / edge — OUT of ANSTRAT-1803 scope; file separately).**
+The full answer is transport option **(B): a receptor/mesh transport** so the
+control plane reaches execution clusters it has no direct route to (the AWX
+precedent: work reached over the receptor mesh, never kube port-forward). This is
+where the "introduce the seam against two concrete implementations" note below
+finally applies — a `receptor` transport alongside the direct one. **Do not file
+this under 1803**; it is a later epic. Capturing it here so the near-term
+single-cluster work is not mistaken for the end state.
+
+## Deliberately *not* abstracted (for now)
+
+No receptor/transport indirection layer was introduced **in the MVP**. The
+transport is a direct Kubernetes port-forward + gRPC call. Per the phasing above,
+the seam for a second transport (receptor) belongs to the out-of-1803 production
+work, introduced then against two concrete implementations — not speculatively in
+the MVP. Until the near-term single-cluster work starts, adding a transport
+interface would be premature.

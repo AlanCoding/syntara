@@ -102,12 +102,13 @@ def run_pod(  # noqa: C901, PLR0912, PLR0915 - single owned pod lifecycle
     with tempfile.TemporaryDirectory(prefix="syntara-node-") as directory:
         config = client.Configuration()
         config.host = target["base_url"]
-        # kubernetes-client renamed the bearer auth scheme from 'authorization' to
-        # 'BearerToken' in v36. Its backward-compat shim reads the token from the
-        # legacy 'authorization' key but looks the prefix up ONLY under 'BearerToken'
-        # (kubernetes-client/python#2595), so setting the prefix under 'authorization'
-        # alone silently drops the "Bearer " scheme and the API server rejects the
-        # header as anonymous. Set both keys so every client version sends "Bearer <token>".
+        # The kubernetes Python client library (PyPI `kubernetes`) renamed the bearer
+        # auth scheme from 'authorization' to 'BearerToken' in v36. Its backward-compat
+        # shim reads the token from the legacy 'authorization' key but looks the prefix
+        # up ONLY under 'BearerToken' (kubernetes-client/python#2595), so setting the
+        # prefix under 'authorization' alone silently drops the "Bearer " scheme and the
+        # API server rejects the header as anonymous. Set both keys so every client
+        # version sends "Bearer <token>".
         config.api_key["authorization"] = target["token"]
         config.api_key["BearerToken"] = target["token"]
         config.api_key_prefix["authorization"] = "Bearer"
@@ -183,7 +184,11 @@ def run_pod(  # noqa: C901, PLR0912, PLR0915 - single owned pod lifecycle
             except TransportError:
                 raise
             except ApiException as exc:
-                message = "OpenShift request failed"
+                # Surface only the HTTP status code — never exc.reason/exc.body, which
+                # can echo request/response detail or credentials. The status alone
+                # distinguishes an auth failure (401/403) from a server error (5xx),
+                # which is otherwise invisible to whoever reads the work-item result.
+                message = f"Kubernetes API request failed (HTTP {exc.status})"
                 raise TransportError(message, retryable=not submitted and exc.status in {429, 502, 503, 504}) from None
             except Exception:  # noqa: BLE001 - never expose raw API credentials or responses
                 message = "Node transport failed"
