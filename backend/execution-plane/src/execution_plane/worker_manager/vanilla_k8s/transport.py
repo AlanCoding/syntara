@@ -102,8 +102,16 @@ def run_pod(  # noqa: C901, PLR0912, PLR0915 - single owned pod lifecycle
     with tempfile.TemporaryDirectory(prefix="syntara-node-") as directory:
         config = client.Configuration()
         config.host = target["base_url"]
+        # kubernetes-client renamed the bearer auth scheme from 'authorization' to
+        # 'BearerToken' in v36. Its backward-compat shim reads the token from the
+        # legacy 'authorization' key but looks the prefix up ONLY under 'BearerToken'
+        # (kubernetes-client/python#2595), so setting the prefix under 'authorization'
+        # alone silently drops the "Bearer " scheme and the API server rejects the
+        # header as anonymous. Set both keys so every client version sends "Bearer <token>".
         config.api_key["authorization"] = target["token"]
+        config.api_key["BearerToken"] = target["token"]
         config.api_key_prefix["authorization"] = "Bearer"
+        config.api_key_prefix["BearerToken"] = "Bearer"
         # Local kind/minikube API servers present a self-signed cert with no CA on
         # the ExecutionTarget; a target may opt out of verification for local dev.
         config.verify_ssl = target.get("verify_ssl", True)
