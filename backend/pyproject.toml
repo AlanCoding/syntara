@@ -139,7 +139,7 @@ syntara-api-client = { path = "src/api_client", editable = true }
 orchestrator-cli = { path = "src/cli", editable = true }
 orchestrator-test-sdk = { path = "test-sdk", editable = true }
 # Pin to the extracted source snapshot until a release tag is available.
-execution-plane = { git = "https://github.com/syntara-orchestration/syntara-execution-plane.git", rev = "cb46fd80908152b0ed57276ec0ae44fb96c420ea" }
+execution-plane = { git = "https://github.com/syntara-orchestration/syntara-execution-plane.git", rev = "1b6a395f87280790aa1418ace366c880749b63f2" }
 
 [project.scripts]
 orchestrator-admin = "syntara.orchestrator_admin:app"

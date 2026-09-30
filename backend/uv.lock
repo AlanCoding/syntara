@@ -965,7 +965,7 @@ wheels = [
 [[package]]
 name = "execution-plane"
 version = "0.1.0"
-source = { git = "https://github.com/syntara-orchestration/syntara-execution-plane.git?rev=cb46fd80908152b0ed57276ec0ae44fb96c420ea#cb46fd80908152b0ed57276ec0ae44fb96c420ea" }
+source = { git = "https://github.com/syntara-orchestration/syntara-execution-plane.git?rev=1b6a395f87280790aa1418ace366c880749b63f2#1b6a395f87280790aa1418ace366c880749b63f2" }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
@@ -4365,7 +4365,7 @@ requires-dist = [
     { name = "boto3-stubs", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=1.35.0" },
     { name = "cachetools", specifier = ">=5.0" },
     { name = "cryptography", specifier = ">=48.0.1" },
-    { name = "execution-plane", git = "https://github.com/syntara-orchestration/syntara-execution-plane.git?rev=cb46fd80908152b0ed57276ec0ae44fb96c420ea" },
+    { name = "execution-plane", git = "https://github.com/syntara-orchestration/syntara-execution-plane.git?rev=1b6a395f87280790aa1418ace366c880749b63f2" },
     { name = "fastapi", specifier = ">=0.135.0" },
     { name = "fastmcp", marker = "extra == 'dev'", specifier = ">=3.2.0,<4.0.0" },
     { name = "filelock", specifier = ">=3.20.0" },

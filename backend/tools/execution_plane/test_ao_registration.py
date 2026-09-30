@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from typing import Self
 
-import ao_registration
 import pytest
-from ao_registration import register_integration_record
+
+from tools.execution_plane import ao_registration
+from tools.execution_plane.ao_registration import register_integration_record
 
 _NAME = "dev-cluster"
 _ENDPOINT = "https://api.example.com:6443"

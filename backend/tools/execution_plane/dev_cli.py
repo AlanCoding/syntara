@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from ao_registration import register_integration_record
 from execution_plane.cluster.cluster_registry import (
     ClusterRegistry,
     NoopDiscoveryMechanism,
@@ -27,6 +26,8 @@ from execution_plane.models.work_item import WorkItem
 from execution_plane.work_store import WorkStore
 from sqlalchemy import delete
 from sqlmodel import col
+
+from .ao_registration import register_integration_record
 
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://admin:admin@localhost:5432/syntara_api"
 DEFAULT_LOCAL_NAMESPACE = "execution-plane"

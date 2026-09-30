@@ -5,13 +5,17 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Self
 
-import dev_cli
 import pytest
+
+from tools.execution_plane import dev_cli
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-from dev_cli import (
+from execution_plane.cluster.cluster_store import ClusterStore
+from execution_plane.models.cluster import ClusterStatus, ClusterType
+
+from tools.execution_plane.dev_cli import (
     CommandResult,
     EnvironmentDetails,
     EnvironmentProvider,
@@ -29,8 +33,6 @@ from dev_cli import (
     main,
     select_provider,
 )
-from execution_plane.cluster.cluster_store import ClusterStore
-from execution_plane.models.cluster import ClusterStatus, ClusterType
 
 _DATABASE_UNAVAILABLE = "database unavailable"
 

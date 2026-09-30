@@ -203,7 +203,7 @@ email-validator==2.3.0 \
     --hash=sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4 \
     --hash=sha256:9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426
     # via pydantic
-execution-plane @ git+https://github.com/syntara-orchestration/syntara-execution-plane.git@cb46fd80908152b0ed57276ec0ae44fb96c420ea
+execution-plane @ git+https://github.com/syntara-orchestration/syntara-execution-plane.git@1b6a395f87280790aa1418ace366c880749b63f2
     # via syntara
 fastapi==0.141.1 \
     --hash=sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3 \

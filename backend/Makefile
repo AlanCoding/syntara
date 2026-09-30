@@ -366,22 +366,22 @@ EP_DEV_ARGS ?=
 
 .PHONY: ep-dev-doctor ep-dev-status ep-dev-up ep-dev-down ep-dev-reset ep-dev-connect
 ep-dev-doctor: check-deps ## Check the selected Kubernetes development environment
-	@uv run python tools/execution_plane/dev_cli.py doctor $(EP_DEV_ARGS)
+	@uv run python -m tools.execution_plane.dev_cli doctor $(EP_DEV_ARGS)
 
 ep-dev-status: check-deps ## Check connectivity to the selected Kubernetes development environment
-	@uv run python tools/execution_plane/dev_cli.py status $(EP_DEV_ARGS)
+	@uv run python -m tools.execution_plane.dev_cli status $(EP_DEV_ARGS)
 
 ep-dev-up: check-deps ## Create/start and register the local Execution Plane Kubernetes cluster
-	@uv run python tools/execution_plane/dev_cli.py up $(EP_DEV_ARGS)
+	@uv run python -m tools.execution_plane.dev_cli up $(EP_DEV_ARGS)
 
 ep-dev-down: check-deps ## Stop or remove the local Kubernetes development environment
-	@uv run python tools/execution_plane/dev_cli.py down $(EP_DEV_ARGS)
+	@uv run python -m tools.execution_plane.dev_cli down $(EP_DEV_ARGS)
 
 ep-dev-reset: check-deps ## Recreate the local Kubernetes development environment
-	@uv run python tools/execution_plane/dev_cli.py reset --yes $(EP_DEV_ARGS)
+	@uv run python -m tools.execution_plane.dev_cli reset --yes $(EP_DEV_ARGS)
 
 ep-dev-connect: check-deps ## Validate access to the configured remote OpenShift environment
-	@uv run python tools/execution_plane/dev_cli.py --provider openshift connect $(EP_DEV_ARGS)
+	@uv run python -m tools.execution_plane.dev_cli --provider openshift connect $(EP_DEV_ARGS)
 
 # Database
 # ========================================================
