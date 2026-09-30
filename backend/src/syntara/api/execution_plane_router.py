@@ -3,10 +3,6 @@
 from typing import Annotated
 
 import structlog
-from fastapi import Depends, Query
-from pydantic import BaseModel, ConfigDict
-from sqlmodel.ext.asyncio.session import AsyncSession
-
 from execution_plane.cluster.cluster_registry import ClusterRegistry, NoopDiscoveryMechanism
 from execution_plane.cluster.cluster_store import ClusterStore
 from execution_plane.execution_target.execution_target_registry import ExecutionTargetRegistry
@@ -14,6 +10,10 @@ from execution_plane.execution_target.execution_target_store import ExecutionTar
 from execution_plane.models.execution_target import ExecutionTarget
 from execution_plane.models.work_item import WorkItem
 from execution_plane.services import WorkItemRegistry
+from fastapi import Depends, Query
+from pydantic import BaseModel, ConfigDict
+from sqlmodel.ext.asyncio.session import AsyncSession
+
 from syntara.authz.dependencies import PermissionChecker
 from syntara.core.database.session import get_db
 from syntara.core.syntara_router import SyntaraRouter

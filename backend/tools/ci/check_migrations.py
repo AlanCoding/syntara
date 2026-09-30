@@ -14,13 +14,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import execution_plane
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from alembic.util.exc import CommandError
 from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
-
-import execution_plane
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 POSTGRES_IMAGE = os.getenv("POSTGRES_IMAGE", "quay.io/sclorg/postgresql-15-c9s")

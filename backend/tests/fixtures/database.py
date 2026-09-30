@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import execution_plane
 import pytest_asyncio
 import structlog
 from alembic import command
@@ -18,7 +19,6 @@ from sqlalchemy.pool import NullPool
 from sqlmodel.ext.asyncio.session import AsyncSession
 from testcontainers.postgres import PostgresContainer
 
-import execution_plane
 from syntara.core.config.base import get_settings
 
 if TYPE_CHECKING:
