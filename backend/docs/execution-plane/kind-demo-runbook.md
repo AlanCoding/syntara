@@ -241,28 +241,13 @@ podman exec execution-plane-control-plane crictl images | grep node-script
 
 The registered target must point at the **in-network** API-server hostname
 (`execution-plane-control-plane:6443`, reachable once the EP worker joins the
-`kind` network) with the SA token as its `api_key`. Register via the dev CLI
-internals. Do **not** use kubeconfig YAML.
+`kind` network) with the SA token as its `api_key`. Use
+[`register_kind_sa_target.py`](../../execution-plane/tools/register_kind_sa_target.py)
+— do **not** use kubeconfig YAML.
 
 ```bash
 cd backend
-uv run python - "$(cat /tmp/sa-token.txt)" <<'PY'
-import asyncio, sys
-sys.path.insert(0, "execution-plane/tools")
-from dev_cli import EnvironmentDetails, EnvironmentProvider, _register_environment_record, DEFAULT_DATABASE_URL
-
-token = sys.argv[1].strip()
-details = EnvironmentDetails(
-    provider=EnvironmentProvider.KIND,
-    name="execution-plane",
-    endpoint="https://execution-plane-control-plane:6443",
-    namespace="execution-plane",
-    api_key=token,  # ServiceAccount bearer token — transport uses Bearer auth
-    labels={"provider": "kind", "cluster": "execution-plane"},
-)
-asyncio.run(_register_environment_record(details, DEFAULT_DATABASE_URL))
-print("registered cluster + default target")
-PY
+uv run python execution-plane/tools/register_kind_sa_target.py /tmp/sa-token.txt
 ```
 
 > Note: `dev_cli`'s `ep-dev-up` stores the full kubeconfig YAML as the target's
