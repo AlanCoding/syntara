@@ -11,20 +11,30 @@ and a ready-to-execute plan. Scoped as its own story.
 
 ## TL;DR
 
-Switching from a bare Pod to a Job is a **small, worthwhile change** whose payoff
-is **resilient, server-side cleanup**. Today we create a bare Pod
-(`transport.run_pod` → `CoreV1Api.create_namespaced_pod`, pod spec from
-`pod_body`) and reap it ourselves in a `finally`. A Job adds
-`ttlSecondsAfterFinished`, which makes the **Kubernetes control plane** delete the
-finished workload — even if our EP worker died before it could reap. The gRPC
-invocation, the port-forward, and the security-hardened pod spec are unchanged;
-only the object we create and how we find its pod change.
+Switching from a bare Pod to a Job is a **small change with a real, product-facing
+benefit: lifecycle robustness.** A Job's `ttlSecondsAfterFinished` makes the
+**Kubernetes control plane** guarantee cleanup of the finished workload — so
+completed pods are reaped **even if our EP worker crashes, restarts, or loses the
+cluster** between dispatch and reap. Today we create a bare Pod
+(`transport.run_pod` → `CoreV1Api.create_namespaced_pod`, spec from `pod_body`) and
+reap it ourselves in a `finally`; that cleanup is only as reliable as our process.
+This is the concrete thing to push on.
+
+The gRPC invocation and the security-hardened pod spec are unchanged. **One thing
+does get more expensive:** a Job generates its pod's name, so reaching the pod's
+gRPC port costs an **extra Kubernetes API call per dispatch** (discover the pod by
+label, then port-forward). That tradeoff is real and is a direct consequence of
+the Job requirement — see ["Reaching the pod's port under a Job"](#reaching-the-pods-port-under-a-job).
 
 ---
 
-## The cleanup point, broken down
+## The benefit: lifecycle robustness, broken down
 
-This is the part worth getting precise, because it's the actual reason to do it.
+This is the part worth getting precise, because it's the actual reason to do it —
+and it's a genuine robustness improvement, not cosmetic. **With a Job, cleanup of
+finished work is guaranteed by the cluster itself and survives any failure of our
+EP worker.** Here is exactly why that's true and why the bare-Pod status quo
+can't offer it.
 
 **A bare Pod is not garbage-collected when it finishes.** Our pod runs with
 `restartPolicy: Never`; when the process exits, the Pod enters `Succeeded` or
@@ -82,15 +92,12 @@ selection, secrets policy (none in the spec), retry classification.
    <small, e.g. 300>`. Keep `activeDeadlineSeconds` on the pod template (hard
    kill) and optionally mirror it on the Job.
 
-2. **Pod discovery — the one real wrinkle.** With a bare Pod we *choose* the name
-   (`syntara-node-<sha>`), so `read_namespaced_pod` and
-   `connect_get_namespaced_pod_portforward` target it directly. A Job **generates**
-   its pod name (`<job>-<rand>`), and port-forward needs a *concrete pod name*. So
-   after creating the Job we must `list_namespaced_pod` by label selector (the
-   auto-added `job-name=<job>`, or our own `syntara.io/...` label) to find the one
-   pod, then wait for `Running` and port-forward to *that* name. This is the main
-   code delta beyond swapping the API call. (Your recollection that it "mostly
-   doesn't change anything other than the pod spec" is right except for this.)
+2. **Pod discovery — the one real wrinkle, and the one real cost.** A Job
+   **generates** its pod name, but port-forward needs a *concrete pod name*, so we
+   must discover the pod before we can reach its gRPC port. This is the only part
+   of the change that is not a free swap — it adds a Kubernetes API call per
+   dispatch. It has its own section below:
+   ["Reaching the pod's port under a Job"](#reaching-the-pods-port-under-a-job).
 
 3. **Cleanup.** Delete the **Job** (not the pod) with
    `propagationPolicy: Background` so the pod cascades; `ttlSecondsAfterFinished`
@@ -108,6 +115,69 @@ selection, secrets policy (none in the spec), retry classification.
    `pod_body` as the (now template) spec builder; add a `job_body` wrapping it.
 
 ---
+
+## Reaching the pod's port under a Job
+
+This is the part to be explicit about, because it is the **only** cost of the
+change and it is a direct, unavoidable consequence of the Job requirement.
+
+**Why it's different.** Our transport reaches the node over a port-forward, and
+`connect_get_namespaced_pod_portforward` requires a **concrete pod name**. Today we
+create a bare Pod with a name *we* choose (`syntara-node-<sha256(identity)>`), so we
+can forward to it immediately — no lookup. A Job does **not** let us name its pod;
+it sets `generateName` and the Job controller appends a random suffix
+(`<job>-<rand>`). So under a Job we must **discover the pod's actual name before we
+can port-forward to it.** There is no way around this with a Job — the pod name is
+the control plane's to assign, by design.
+
+**The mechanism (concrete).** Fold discovery into the readiness poll we already
+run. Today the loop is:
+
+```
+create_namespaced_pod(name=...)                      # 1 create
+loop: read_namespaced_pod(name) until phase==Running # get-by-name, N times
+```
+
+Under a Job it becomes:
+
+```
+create_namespaced_job(name=...)                                        # 1 create
+loop: list_namespaced_pod(label_selector="job-name=<job>")            # list-by-label, N times
+      → wait for the Job controller to create the pod (list may be empty at first)
+      → take the single item, check phase==Running, capture its real name
+port-forward to that captured pod name                                 # unchanged thereafter
+```
+
+Everything after we have the pod name — `forward_socket`, the gRPC channel,
+`invoke`, the result — is **identical**. Cleanup deletes the **Job**
+(`propagationPolicy: Background`) and the pod cascades; `ttlSecondsAfterFinished`
+is the backstop.
+
+**The tradeoff, stated plainly (and pinned to the request).** The readiness poll
+changes from a `get`-by-name to a **`list`-by-label**, and it gains one new
+transient state: a short window right after Job creation where the pod does not
+exist yet, so the first list(s) return empty and we keep polling until the Job
+controller spawns the pod (bounded by the same `startup` deadline that already
+governs "pod did not become ready" → retryable). Net cost per dispatch:
+
+- a **heavier API call** in the poll loop (a label-indexed collection query
+  instead of a single-object read), and
+- a **slightly longer, more failure-prone path to "Running"** (the Job
+  controller's pod-creation step is now inside our critical path).
+
+This is modest, but it is **not free**, and it buys us nothing on the execution
+path itself — it is purely the access cost of letting the control plane own the pod
+name. **It exists solely because Jobs were requested (by Ron, Product).** Flagging
+it here so the cost is attributed to that decision rather than showing up later as
+an unexplained tax on dispatch latency/API load. If dispatch throughput becomes a
+concern, the list-poll can be upgraded to a single pod `watch` scoped to the
+label selector (one streaming call instead of repeated lists) — note it as an
+optimization, not a requirement.
+
+> Alternative considered and rejected: create the Pod ourselves (named) *and* a
+> Job that adopts it. That reintroduces client-managed pod naming but forfeits the
+> whole point — the TTL/ownership cleanup guarantee only applies to pods the Job
+> controller created and owns. Not worth it.
 
 ## Implementation sketch
 

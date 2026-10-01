@@ -249,15 +249,91 @@ real project). Options, in rough order of preference:
 
 Pick deliberately; this is a real divergence from "one small envelope".
 
-### 4.4 Event volume and long-running jobs
+### 4.4 Job events: custom callbacks straight to gRPC — and the GB-output question
 
-A script node returns one `Result`. An Ansible run emits thousands of job events
-over minutes-to-hours and expects them **persisted incrementally** (AWX stores
-`JobEvent`s as they stream). Confirm the gRPC progress stream + `work_items`
-result model can (a) sustain the volume, (b) persist events incrementally rather
-than only at completion, and (c) tolerate run times far beyond a script node —
-which stresses the serial-dispatch (shortcut 7), fixed-timeout, and
-single-port-forward-per-call assumptions.
+The design to pursue (and the one the team proposed): rather than run
+`ansible-runner worker` and parse its stdout stream, run ansible-runner **locally
+in-pod** and register a **custom `event_handler`** (plus `status_handler`,
+`artifacts_handler`, `finished_callback`, `cancel_callback` via
+`ansible_runner.interface.run(...)`) that pushes each event **straight onto the
+gRPC progress stream**. This is sound and is essentially what the `worker` streamer
+already is — a built-in `event_handler` that writes JSON to stdout; we substitute
+one that encodes a `Progress` event. Findings that shape it:
+
+**Yes, this avoids the on-disk event *artifacts* — same trick the worker uses.**
+`Runner` only persists the final `job_events/<counter>-<uuid>.json` file when the
+`event_handler` returns truthy (`runner.py` `should_write`). The `worker` streamer's
+handler returns `None`, so those files are never written. A custom gRPC handler
+that **returns `False`** gets the identical behavior — no final event files.
+
+**But you cannot make it fully disk-free without forking the callback plugin.**
+The `awx_display` ansible callback writes a **transient `<uuid>-partial.json`** to
+disk *inside the ansible process* for every event (it's the sole transport for the
+full event dict); `Runner.event_callback` then reads and immediately deletes it
+(`remove_partials=True`). So event data — which can include sensitive task results
+unless `no_log` — touches disk briefly. The mitigation is the **same memory-backed
+volume from §4.1**: point the `private_data_dir`/artifact dir at the tmpfs so the
+partials live in RAM, never on real disk. Eliminating the partial entirely means
+modifying `awx_display`'s `IsolatedFileWrite` — a bigger lift, probably not worth it
+if the tmpfs answer holds.
+
+**Will it hold up in memory for many-GB output? As a *stream*, yes — with caveats.**
+The good news is there's genuine backpressure end to end, so total output does
+**not** accumulate in memory:
+
+- *ansible → handler is synchronous, no queue.* The handler is called inline on the
+  stdout-reading thread. If the gRPC push stalls, it blocks the stdout pump, which
+  (once the OS pipe buffer fills) blocks ansible itself. Events are throttled, not
+  buffered. (Consequence: a slow consumer *slows the job* — acceptable, but real.)
+- *our gRPC `Execute` is true server-streaming, read lazily* (`client.py` `for event
+  in call:`), delivering each `Progress` to the callback synchronously with HTTP/2
+  flow control. Nothing is drained into a list client-side.
+
+So memory is bounded by **the largest single event + the in-flight window**, not by
+the GB total. The caveats are the hard ceilings, and they are the real work:
+
+1. **Hard 2 MiB per-gRPC-message cap, no chunking.** `codec.py`
+   `MAX_MESSAGE_BYTES = 2 MiB` is set as `grpc.max_receive_message_length`; any
+   single `ExecutionEvent` over 2 MiB aborts the call with `RESOURCE_EXHAUSTED`.
+   ansible mostly keeps events small for us already — the callback caps a task's
+   `res` at `MAX_EVENT_RES` (**700 KB**, replacing an oversize `res` with `{}`), and
+   large stdout is split per-line into separate `verbose` events. But that cap does
+   **not** cover every field (e.g. the `playbook_on_stats` event is exempt, and
+   `OutputEventFilter` buffers a single event's marker in an unbounded in-memory
+   `StringIO` before the handler sees it). So the in-pod runtime must **guard each
+   event against the 2 MiB wall** — split, truncate, or spill oversize events —
+   rather than assume ansible keeps them small. Alternatively raise the cap and/or
+   add a chunking layer to the node protocol (a real protocol change).
+
+2. **Don't put aggregate output in the final `Result`.** The terminal `Result` is a
+   **single** gRPC message (≤ `max_output_bytes`, default **1 MiB**). GB of output
+   cannot live there. Model ansible output as the **`Progress` event stream**; the
+   `Result` carries only terminal status / rc / stats (small). This is the natural
+   shape and sidesteps the single-message limit for the bulk.
+
+3. **The consumer must actually keep up and persist incrementally.** Today
+   `on_progress` in `manager.py` just debug-logs and discards the event. For an
+   Ansible job it must become an **incremental persister** (store each event like
+   AWX's `JobEvent`, or forward to a stream) — and because it's synchronous with
+   backpressure, a slow persister throttles the job. If decoupling is needed, add a
+   **bounded** queue in the consumer (bounded, so memory stays capped; with an
+   explicit full-queue policy — block vs. drop).
+
+4. **Pod resources.** Today's pod is `512Mi` memory with a `64Mi` memory `/tmp`
+   (`pod_body`). Real ansible plus a tmpfs `private_data_dir` (project + transient
+   partials) needs materially more — raise both, and keep the volume `medium:
+   Memory` so nothing persists. (Overlaps §4.1 and the resource-limits gap.)
+
+**Net:** the custom-callback-to-gRPC model is the right one and is memory-safe *as a
+stream* thanks to two-sided backpressure. The actual engineering is (1) keeping
+every event under the 2 MiB message cap (or adding chunking), (2) streaming bulk
+output as events rather than in the `Result`, (3) an incremental, keep-up consumer,
+and (4) bigger pod/tmpfs limits. None of these is the "it all buffers in RAM"
+failure the GB-output worry implies — provided we never try to accumulate.
+
+Separately, long Ansible runs stress the MVP's serial-dispatch (shortcut 7),
+fixed-timeout, and single-port-forward-per-call assumptions — size those for
+minutes-to-hours, not seconds.
 
 ### 4.5 Multi-cluster reach (the mesh)
 
