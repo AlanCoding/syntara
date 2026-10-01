@@ -15,6 +15,7 @@ from execution_plane.execution_target.execution_target_store import (
 )
 from execution_plane.models.cluster import Cluster, ClusterStatus
 from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 from sqlalchemy.pool import NullPool
 
 _DATABASE_UNAVAILABLE = "database unavailable"
@@ -29,6 +30,7 @@ def _target(*, is_default: bool = False, status: TargetStatus = TargetStatus.REG
         name="target-a",
         backend_type=BackendType.VANILLA_K8S,
         endpoint="https://target.example",
+        placement=KubernetesPlacement(namespace="default"),
         api_key="secret",
         is_default=is_default,
         status=status,
@@ -120,6 +122,7 @@ class _Store:
     def __init__(self, target: ExecutionTarget) -> None:
         self.target = target
         self.delete_requested = False
+        self.updated: dict[str, object] = {}
 
     async def create(self, *_: object, **__: object) -> ExecutionTarget:
         return self.target
@@ -140,7 +143,8 @@ class _Store:
     async def activate(self, _target_id: uuid.UUID, _updated_by: uuid.UUID) -> ExecutionTarget:
         return self.target
 
-    async def update(self, _target_id: uuid.UUID, **_: object) -> ExecutionTarget:
+    async def update(self, _target_id: uuid.UUID, **kwargs: object) -> ExecutionTarget:
+        self.updated = kwargs
         return self.target
 
 
@@ -162,12 +166,15 @@ async def test_store_creates_target_with_audit_fields_and_owns_the_commit() -> N
         is_default=False,
         created_by=creator_id,
         labels={"region": "eu-west"},
+        placement=KubernetesPlacement(namespace="execution"),
     )
 
     assert target.cluster_id == cluster_id
     assert target.created_by == creator_id
     assert target.updated_by == creator_id
     assert target.labels == {"region": "eu-west"}
+    assert isinstance(target.placement, KubernetesPlacement)
+    assert target.placement.namespace == "execution"
     assert target.api_key == ""
     assert session.added is not target
     assert session.added.api_key == "secret"  # type: ignore[union-attr]
@@ -182,6 +189,7 @@ async def test_store_rejects_a_second_default_target_for_a_cluster() -> None:
     store = ExecutionTargetStore("postgresql+asyncpg://localhost/syntara")
     session = _Session(result=_Result(existing_default))
     store._session_factory = _SessionFactory(session)  # type: ignore[assignment]
+    placement = KubernetesPlacement(namespace="default")
 
     with pytest.raises(DefaultExecutionTargetError):
         await store.create(
@@ -192,6 +200,7 @@ async def test_store_rejects_a_second_default_target_for_a_cluster() -> None:
             "secret",
             is_default=True,
             created_by=uuid.uuid4(),
+            placement=placement,
         )
 
     assert session.added is None
@@ -215,6 +224,7 @@ async def test_store_rolls_back_when_target_creation_cannot_commit() -> None:
             "secret",
             is_default=False,
             created_by=uuid.uuid4(),
+            placement=KubernetesPlacement(namespace="default"),
         )
 
     assert session.rollbacks == 1
@@ -255,12 +265,15 @@ async def test_store_updates_target_metadata_and_audit_fields_without_exposing_s
         name="renamed-target",
         endpoint="https://updated.example",
         labels={"region": "eu-west"},
+        placement=KubernetesPlacement(namespace="updated"),
         status_message="updated",
     )
 
     assert result.name == "renamed-target"
     assert result.endpoint == "https://updated.example"
     assert result.labels == {"region": "eu-west"}
+    assert isinstance(result.placement, KubernetesPlacement)
+    assert result.placement.namespace == "updated"
     assert result.status_message == "updated"
     assert result.cluster_id == original_cluster_id
     assert result.is_default is True
@@ -347,12 +360,21 @@ async def test_registry_delegates_create_get_activate_and_update() -> None:
             target.api_key,
             target.is_default,
             target.created_by,
+            placement=KubernetesPlacement(namespace="execution"),
         )
         is target
     )
     assert await registry.get(target.id) is target
     assert await registry.activate(target.id, uuid.uuid4()) is target
-    assert await registry.update(target.id, updated_by=uuid.uuid4(), name="renamed") is target
+    assert (
+        await registry.update(
+            target.id,
+            updated_by=uuid.uuid4(),
+            name="renamed",
+            placement=KubernetesPlacement(namespace="execution"),
+        )
+        is target
+    )
 
 
 @pytest.mark.asyncio

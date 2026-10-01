@@ -9,6 +9,7 @@ from typing import Self
 import pytest
 from execution_plane.models.cluster import Cluster, ClusterStatus, ClusterType
 from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 
 _DATABASE_UNAVAILABLE = "database unavailable"
 _TARGET_UNAVAILABLE = "target unavailable"
@@ -41,6 +42,11 @@ def _target(*, cluster_id: uuid.UUID | None = None, is_default: bool = False) ->
         backend_type=BackendType.VANILLA_K8S,
         is_default=is_default,
         status=TargetStatus.ACTIVE,
+        placement=KubernetesPlacement(
+            namespace="execution",
+            node_selectors=["kubernetes.io/os=linux"],
+            tolerations=["dedicated=execution:NoSchedule"],
+        ),
         created_by=uuid.uuid4(),
         created_at=now,
         updated_by=uuid.uuid4(),
@@ -252,6 +258,9 @@ class _ClusterStore:
         self.created = True
         return self.cluster
 
+    async def update(self, *_: object, **__: object) -> Cluster:
+        return self.cluster
+
     async def record_discovery_state(
         self, _cluster_id: uuid.UUID, status: ClusterStatus, status_message: str | None, _updated_by: uuid.UUID
     ) -> Cluster:
@@ -289,6 +298,7 @@ class _TargetRegistry:
         self.created: list[dict[str, object]] = []
         self.targets = targets or []
         self.finalized: list[uuid.UUID] = []
+        self.updated: list[dict[str, object]] = []
 
     async def create(self, **kwargs: object) -> ExecutionTarget:
         self.created.append(kwargs)
@@ -301,6 +311,10 @@ class _TargetRegistry:
 
     async def list(self, **_: object) -> list[ExecutionTarget]:
         return self.targets
+
+    async def update(self, _target_id: uuid.UUID, **kwargs: object) -> ExecutionTarget:
+        self.updated.append(kwargs)
+        return self.targets[0]
 
     async def finalize_delete(self, target_id: uuid.UUID) -> None:
         self.finalized.append(target_id)
@@ -338,8 +352,17 @@ async def test_registry_creates_every_discovered_target_via_target_registry_then
     discovery = _Discovery(
         DiscoveryResult.discovered(
             [
-                DiscoveredExecutionTarget("primary", BackendType.VANILLA_K8S, "https://one", "key-1", is_default=True),
-                DiscoveredExecutionTarget("extra", BackendType.OPENSHELL, "https://two", "key-2"),
+                DiscoveredExecutionTarget(
+                    "primary",
+                    BackendType.VANILLA_K8S,
+                    "https://one",
+                    "key-1",
+                    KubernetesPlacement(namespace="default"),
+                    is_default=True,
+                ),
+                DiscoveredExecutionTarget(
+                    "extra", BackendType.OPENSHELL, "https://two", "key-2", KubernetesPlacement(namespace="default")
+                ),
             ]
         )
     )
@@ -377,7 +400,16 @@ async def test_registry_marks_persisted_cluster_error_when_discovery_or_default_
         _TargetRegistry(fail_default=True),  # type: ignore[arg-type]
         _Discovery(  # type: ignore[arg-type]
             DiscoveryResult.discovered(
-                [DiscoveredExecutionTarget("primary", BackendType.VANILLA_K8S, "https://one", "key-1", is_default=True)]
+                [
+                    DiscoveredExecutionTarget(
+                        "primary",
+                        BackendType.VANILLA_K8S,
+                        "https://one",
+                        "key-1",
+                        KubernetesPlacement(namespace="default"),
+                        is_default=True,
+                    )
+                ]
             )
         ),
     )
@@ -427,7 +459,13 @@ async def test_registry_marks_cluster_error_when_discovery_returns_no_single_def
     cluster = _cluster()
     store = _ClusterStore(cluster)
     discovery = _Discovery(
-        DiscoveryResult.discovered([DiscoveredExecutionTarget("one", BackendType.VANILLA_K8S, "https://one", "key")])
+        DiscoveryResult.discovered(
+            [
+                DiscoveredExecutionTarget(
+                    "one", BackendType.VANILLA_K8S, "https://one", "key", KubernetesPlacement(namespace="default")
+                )
+            ]
+        )
     )
 
     result = await ClusterRegistry(store, _TargetRegistry(), discovery).register(  # type: ignore[arg-type]
@@ -452,8 +490,17 @@ async def test_registry_keeps_cluster_active_when_a_non_default_target_fails() -
     discovery = _Discovery(
         DiscoveryResult.discovered(
             [
-                DiscoveredExecutionTarget("primary", BackendType.VANILLA_K8S, "https://one", "key", is_default=True),
-                DiscoveredExecutionTarget("extra", BackendType.OPENSHELL, "https://two", "key"),
+                DiscoveredExecutionTarget(
+                    "primary",
+                    BackendType.VANILLA_K8S,
+                    "https://one",
+                    "key",
+                    KubernetesPlacement(namespace="default"),
+                    is_default=True,
+                ),
+                DiscoveredExecutionTarget(
+                    "extra", BackendType.OPENSHELL, "https://two", "key", KubernetesPlacement(namespace="default")
+                ),
             ]
         )
     )
@@ -475,6 +522,28 @@ async def test_registry_delegates_get_and_list_to_the_cluster_store() -> None:
 
     assert await registry.get(cluster.id) is cluster
     assert await registry.list(status=ClusterStatus.ACTIVE, enabled=True) == [cluster]
+
+
+@pytest.mark.asyncio
+async def test_sync_update_forwards_placement_patch_to_target_registry() -> None:
+    from execution_plane.cluster.cluster_registry import ClusterRegistry
+
+    cluster = _cluster()
+    target = _target(cluster_id=cluster.id, is_default=True)
+    targets = _TargetRegistry(targets=[target])
+    registry = ClusterRegistry(_ClusterStore(cluster), targets, _Discovery(object()))  # type: ignore[arg-type]
+
+    await registry.sync_update(
+        cluster.id,
+        updated_by=uuid.uuid4(),
+        placement=KubernetesPlacement(namespace="updated"),
+    )
+
+    placement = targets.updated[0]["placement"]
+    assert isinstance(placement, KubernetesPlacement)
+    assert placement.namespace == "updated"
+    assert placement.node_selectors == []
+    assert placement.tolerations == []
 
 
 def test_noop_discovery_returns_a_failed_result() -> None:

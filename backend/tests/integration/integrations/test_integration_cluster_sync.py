@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from syntara.core.models import User
@@ -99,7 +100,7 @@ class TestClusterSyncOnCreate:
         assert kw["name"] == "Test OpenShift"
         assert kw["endpoint"] == "https://openshift.example.com:6443"
         assert kw["api_key"] == "test-api-key"
-        assert kw["namespace"] == "syntara-workers"
+        assert kw["placement"] == KubernetesPlacement(namespace="syntara-workers")
         assert kw["created_by"] == test_user.id
         assert kw["labels"]["integration_name"] == "Test OpenShift"
 
@@ -304,7 +305,7 @@ class TestClusterSyncOnUpdate:
 
         registry.sync_update.assert_called_once()
         kw = registry.sync_update.call_args[1]
-        assert kw["namespace"] == "new-namespace"
+        assert kw["placement"] == KubernetesPlacement(namespace="new-namespace")
         assert kw["endpoint"] == "https://openshift.example.com:6443"
         assert kw["updated_by"] == test_user.id
 
@@ -333,6 +334,7 @@ class TestClusterSyncOnUpdate:
         registry.sync_update.assert_called_once()
         kw = registry.sync_update.call_args[1]
         assert kw["name"] == "Renamed OpenShift"
+        assert kw["placement"] is None
 
     @pytest.mark.asyncio
     async def test_openshift_update_irrelevant_field_does_not_sync(

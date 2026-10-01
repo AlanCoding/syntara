@@ -17,6 +17,11 @@ from execution_plane.store_base import StoreBase
 if TYPE_CHECKING:
     import uuid
 
+    from execution_plane.models.execution_target_placement import (
+        ExecutionTargetPlacement,
+        ExecutionTargetPlacementTypes,
+    )
+
 
 class ExecutionTargetNotFoundError(LookupError):
     """Raised when a lifecycle transition targets an unknown execution target."""
@@ -42,6 +47,17 @@ class ExecutionTargetStore(StoreBase):
     """Persist execution targets and own their database resources."""
 
     @staticmethod
+    def _merge_placement(
+        current: ExecutionTargetPlacementTypes,
+        patch: ExecutionTargetPlacementTypes,
+    ) -> ExecutionTargetPlacementTypes:
+        """Apply explicitly supplied placement fields without dropping stored values."""
+        if current.type != patch.type:
+            return patch
+        updates = patch.model_dump(exclude={"type"}, exclude_unset=True)
+        return current.model_copy(update=updates)
+
+    @staticmethod
     def _can_add_execution_target(cluster: Cluster | None) -> bool:
         """Return whether a Cluster can accept another target."""
         if cluster is None:
@@ -59,8 +75,8 @@ class ExecutionTargetStore(StoreBase):
         api_key: str,
         is_default: bool,  # noqa: FBT001
         created_by: uuid.UUID,
+        placement: ExecutionTargetPlacement,
         labels: dict[str, str] | None = None,
-        namespace: str = "default",
     ) -> ExecutionTarget:
         """Create a target, rejecting a second default in the same cluster."""
         now = datetime.now(UTC)
@@ -69,7 +85,7 @@ class ExecutionTargetStore(StoreBase):
             name=name,
             backend_type=backend_type,
             endpoint=endpoint,
-            namespace=namespace,
+            placement=placement,
             api_key=api_key,
             is_default=is_default,
             labels=labels or {},
@@ -183,7 +199,7 @@ class ExecutionTargetStore(StoreBase):
         updated_by: uuid.UUID,
         name: str | None = None,
         endpoint: str | None = None,
-        namespace: str | None = None,
+        placement: ExecutionTargetPlacement | None = None,
         labels: dict[str, str] | None = None,
         status_message: str | None = None,
         api_key: str | None = None,
@@ -191,15 +207,15 @@ class ExecutionTargetStore(StoreBase):
         """Update mutable target metadata without changing ownership or default status."""
         async with self._session_context() as session:
             try:
-                target = await session.get(ExecutionTarget, target_id)
+                target = await session.get(ExecutionTarget, target_id, with_for_update=True)
                 if target is None:
                     raise ExecutionTargetNotFoundError(target_id)  # noqa: TRY301
                 if name is not None:
                     target.name = name
                 if endpoint is not None:
                     target.endpoint = endpoint
-                if namespace is not None:
-                    target.namespace = namespace
+                if placement is not None:
+                    target.placement = self._merge_placement(target.placement, placement)
                 if labels is not None:
                     target.labels = labels
                 if status_message is not None:
@@ -221,7 +237,7 @@ class ExecutionTargetStore(StoreBase):
         updated_by: uuid.UUID,
         endpoint: str | None = None,
         api_key: str | None = None,
-        namespace: str | None = None,
+        placement: ExecutionTargetPlacement,
     ) -> ExecutionTarget:
         """Re-enable a DRAINING target and transition it back to ACTIVE."""
         async with self._session_context() as session:
@@ -236,8 +252,7 @@ class ExecutionTargetStore(StoreBase):
                     target.endpoint = endpoint
                 if api_key is not None:
                     target.api_key = api_key
-                if namespace is not None:
-                    target.namespace = namespace
+                target.placement = placement
                 target.updated_by = updated_by
                 target.updated_at = datetime.now(UTC)
                 await session.commit()
