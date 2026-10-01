@@ -139,6 +139,20 @@ class _FakeChannel:
         return None
 
 
+class _CapturingLogger:
+    """Minimal structlog double that records ``logger.warning`` calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def warning(self, event: str, **kwargs: Any) -> None:  # noqa: ANN401 - structlog kwargs are arbitrary
+        self.calls.append((event, kwargs))
+
+    def __getattr__(self, _name: str) -> Callable[..., None]:
+        # debug/info/error/etc. are no-ops for these tests.
+        return lambda *_a, **_k: None
+
+
 def _install_happy_transport(
     monkeypatch: pytest.MonkeyPatch,
     api: _FakeApi,
@@ -274,6 +288,25 @@ class TestRunPod:
             _run(api)
         assert "403" in str(exc_info.value)
         assert "secret-cluster-detail" not in str(exc_info.value)
+
+    def test_api_exception_logs_full_detail_for_admins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The user-facing error is deliberately thin (status only); admins get the
+        # full detail from the log instead. Assert the log carries the reason/body
+        # and is keyed by work item + pod so an operator can track it down.
+        api = _FakeApi()
+        error = ApiException(status=403, reason="forbidden-detail")
+        error.body = "who you are: anonymous"  # set by the real client from the API response body
+        api.create_error = error
+        _install_happy_transport(monkeypatch, api, {"result": {}})
+        captured = _CapturingLogger()
+        monkeypatch.setattr(transport_module, "logger", captured)
+        with pytest.raises(TransportError):
+            _run(api)
+        warnings = [kwargs for event, kwargs in captured.calls if "failed" in event.lower()]
+        assert any(kw.get("work_item_id") == _IDENTITY for kw in warnings)
+        assert any(kw.get("http_status") == 403 for kw in warnings)
+        assert any("forbidden-detail" in str(kw.get("reason")) for kw in warnings)
+        assert any("who you are: anonymous" in str(kw.get("response_body")) for kw in warnings)
 
 
 class TestAuthConfiguration:

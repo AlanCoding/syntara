@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import grpc
+import structlog
 from kubernetes import client
 from kubernetes.client.exceptions import ApiException
 from kubernetes.stream import portforward
@@ -24,7 +25,25 @@ if TYPE_CHECKING:
     import threading
     from collections.abc import Callable
 
+logger = structlog.stdlib.get_logger(__name__)
+
 MAX_FRAME_BYTES = MAX_MESSAGE_BYTES
+
+# Cap how much of a Kubernetes error body we write to the admin log. The API
+# server's failure body is a small Status object, but a misbehaving proxy can
+# return an arbitrarily large page — truncate so one bad response can't flood
+# the log.
+_MAX_LOGGED_BODY_CHARS = 2048
+
+
+def _truncate_for_log(value: object) -> str | None:
+    """Stringify and bound a value for a log field; ``None`` stays ``None``."""
+    if value is None:
+        return None
+    text = value if isinstance(value, str) else str(value)
+    if len(text) > _MAX_LOGGED_BODY_CHARS:
+        return text[:_MAX_LOGGED_BODY_CHARS] + "…(truncated)"
+    return text
 
 
 class TransportError(Exception):
@@ -184,13 +203,36 @@ def run_pod(  # noqa: C901, PLR0912, PLR0915 - single owned pod lifecycle
             except TransportError:
                 raise
             except ApiException as exc:
+                # Admins need the full failure detail to diagnose auth/RBAC/quota
+                # problems, but that detail must not leak to whoever reads the
+                # work-item result. Log the rich context server-side — keyed by work
+                # item and pod so it is traceable — then raise a sanitized error.
+                logger.warning(
+                    "Kubernetes API request failed",
+                    work_item_id=identity,
+                    pod=name,
+                    namespace=namespace,
+                    http_status=exc.status,
+                    reason=exc.reason,
+                    response_body=_truncate_for_log(exc.body),
+                )
                 # Surface only the HTTP status code — never exc.reason/exc.body, which
                 # can echo request/response detail or credentials. The status alone
                 # distinguishes an auth failure (401/403) from a server error (5xx),
                 # which is otherwise invisible to whoever reads the work-item result.
                 message = f"Kubernetes API request failed (HTTP {exc.status})"
                 raise TransportError(message, retryable=not submitted and exc.status in {429, 502, 503, 504}) from None
-            except Exception:  # noqa: BLE001 - never expose raw API credentials or responses
+            except Exception as exc:  # noqa: BLE001 - never expose raw API credentials or responses
+                # Catch-all for non-API failures (DNS, TLS, socket). Log the
+                # exception type for admin triage — not str(exc), which could carry
+                # request detail — then raise a sanitized error.
+                logger.warning(
+                    "Node transport failed",
+                    work_item_id=identity,
+                    pod=name,
+                    namespace=namespace,
+                    error_type=type(exc).__name__,
+                )
                 message = "Node transport failed"
                 raise TransportError(message, retryable=False) from None
             finally:
