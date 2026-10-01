@@ -304,7 +304,7 @@ Create the workflow in a single `POST /workflows` — the request carries the fu
 project first:
 
 ```bash
-PROJ=$(curl -sk "$BASE/api/v1/projects" -H "Authorization: Bearer $TOKEN" | jq -r '.resources[0].id')
+PROJ=$(curl -sk "$BASE/api/v1/projects" -H "Authorization: Bearer $TOKEN" | jq -r '.resources[-1].id')
 
 WF=$(curl -sk -X POST "$BASE/api/v1/workflows" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d "{
