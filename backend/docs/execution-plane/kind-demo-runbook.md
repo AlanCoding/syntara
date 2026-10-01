@@ -289,64 +289,23 @@ done) or a stale EP image (rebuild as above).
 
 ## Step 8 — Run the demo through the API
 
-There is no pytest suite against this live kind path. Drive it through the API:
+There is no pytest suite against this live kind path. Scripts next to this
+runbook log in as admin, create the workflow from
+[hello-world-demo.json](hello-world-demo.json), start an execution at trigger
+id `"trigger"` (not the script node), and poll until `completed` or `failed`.
 
 ```bash
-BASE="https://localhost:8000"
-PW=$(podman exec syntara_syntara_1 cat /run/secrets/admin-password)
-TOKEN=$(curl -sk -X POST "$BASE/api/v1/auth/login" -H "Content-Type: application/json" \
-  -d "{\"username\":\"admin\",\"password\":\"$PW\"}" | jq -r .access_token)   # expires ~15 min
+backend/docs/execution-plane/run-hello-world-demo.sh
 ```
 
-Create the workflow in a single `POST /workflows` — the request carries the full
-`workflow_definition` (a manual trigger → one script node that echoes
-`hello world`) and the backend creates version 1 for you. Grab the seeded default
-project first:
+Re-run without recreating the workflow (pass the execution id printed above):
 
 ```bash
-PROJ=$(curl -sk "$BASE/api/v1/projects" -H "Authorization: Bearer $TOKEN" | jq -r '.resources[-1].id')
-
-WF=$(curl -sk -X POST "$BASE/api/v1/workflows" -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -d "{
-    \"name\": \"hello-world-demo\",
-    \"description\": \"Cold-start EP: single script node echoing hello world\",
-    \"project_id\": \"$PROJ\",
-    \"workflow_definition\": {
-      \"name\": \"hello-world-demo\",
-      \"schema_version\": \"2.0.0\",
-      \"triggers\": [{\"id\": \"trigger\", \"type\": \"manual_trigger\", \"parameters\": {}}],
-      \"nodes\": [{\"id\": \"script_node\", \"name\": \"Hello Script\", \"type\": \"script\",
-                   \"parameters\": {\"code\": \"echo 'hello world'\", \"language\": \"bash\"}}],
-      \"edges\": [{\"from\": \"trigger\", \"to\": \"script_node\"}]
-    }
-  }" | jq -r .id)
-echo "workflow: $WF"
+backend/docs/execution-plane/retry-hello-world-demo.sh <execution-id>
 ```
 
-Then create an execution. `ExecutionCreate` requires `workflow_id` and
-`trigger_node_id` — the latter is the **trigger** id (`"trigger"`), the entry
-point to start from, *not* the script node id:
-
-```bash
-EXEC=$(curl -sk -X POST "$BASE/api/v1/executions" -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"workflow_id\":\"$WF\",\"trigger_node_id\":\"trigger\",\"input_data\":{}}" \
-  | jq -r .id)
-
-# poll
-for i in $(seq 1 30); do
-  ST=$(curl -sk "$BASE/api/v1/executions/$EXEC" -H "Authorization: Bearer $TOKEN" | jq -r .status)
-  echo "$ST"; { [ "$ST" = completed ] || [ "$ST" = failed ]; } && break; sleep 3
-done
-```
-
-Easiest re-run: retry an existing execution — it reuses the same workflow
-version, inputs, and trigger, so no need to restate `trigger_node_id`:
-
-```bash
-EXEC=$(curl -sk -X POST "$BASE/api/v1/executions/$EXEC/retry" \
-  -H "Authorization: Bearer $TOKEN" | jq -r .id)
-```
+Login tokens expire in about 15 minutes; each script logs in again. Override
+`BASE` (default `https://localhost:8000`) or `ADMIN_PASSWORD` if needed.
 
 ## Verification
 
