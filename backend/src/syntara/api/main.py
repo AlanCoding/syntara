@@ -220,9 +220,8 @@ async def _lifespan_startup(app: FastAPI) -> dict[str, Any]:  # noqa: PLR0915
     # ========================================================================
     # EXECUTION PLANE API FACADE
     # ------------------------------------------------------------------------
-    # Syntara owns the public API facade and authorization. Its implementation
-    # uses the standalone execution-plane package for registry/store behavior.
-    # See docs/execution-plane/integration.md for the current boundary.
+    # Syntara owns public authorization. Execution Plane reads and mutations
+    # cross its versioned HTTP contract through the AO-owned adapter.
     # ------------------------------------------------------------------------
     app.include_router(ep_router)
     # ========================================================================

@@ -14,7 +14,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import execution_plane
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -44,11 +43,6 @@ DATABASES: list[DatabaseConfig] = [
         name="main",
         ini_file="alembic.ini",
         script_location="src/syntara/core/database/migrations",
-    ),
-    DatabaseConfig(
-        name="execution-plane",
-        ini_file=None,
-        script_location=str(Path(execution_plane.__file__).resolve().parent / "migrations"),
     ),
 ]
 

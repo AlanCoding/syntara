@@ -8,7 +8,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import execution_plane
 import pytest_asyncio
 import structlog
 from alembic import command
@@ -58,12 +57,6 @@ async def _upgrade_database_schema(db_url: str) -> None:
     logger.debug("Applying Alembic migrations to test database %s", db_url)
     try:
         await asyncio.to_thread(command.upgrade, _get_alembic_config(db_url), "head")
-        ep_config = Config()
-        ep_config.set_main_option(
-            "script_location", str(Path(execution_plane.__file__).resolve().parent / "migrations")
-        )
-        ep_config.set_main_option("sqlalchemy.url", db_url)
-        await asyncio.to_thread(command.upgrade, ep_config, "head")
         logger.debug("Successfully applied migrations to %s", db_url)
     except Exception:  # pragma: no cover - defensive logging
         logger.exception("Failed to apply migrations to %s", _safe_url(db_url))

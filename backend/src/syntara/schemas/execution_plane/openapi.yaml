@@ -127,22 +127,10 @@ components:
             type: string
           type: object
           title: Labels
-        created_by:
-          type: string
-          format: uuid
-          title: Created By
         created_at:
           type: string
           format: date-time
           title: Created At
-        updated_by:
-          type: string
-          format: uuid
-          title: Updated By
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
         last_ran_at:
           anyOf:
             - type: string
@@ -155,10 +143,7 @@ components:
         - name
         - backend_type
         - endpoint
-        - created_by
         - created_at
-        - updated_by
-        - updated_at
       title: ExecutionTarget
       description: A registered compute environment where worker pods run.
     ExecutionTargetListResponse:
@@ -241,13 +226,17 @@ components:
           type: string
           format: uuid
           title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        request_id:
+          type: string
+          title: Request Id
         work_correlation_id:
           type: string
           format: uuid
           title: Work Correlation Id
-        activity_handle:
-          type: string
-          title: Activity Handle
         status:
           $ref: '#/components/schemas/WorkItemStatus'
           default: pending
@@ -257,11 +246,6 @@ components:
               format: uuid
             - type: 'null'
           title: Execution Target Id
-        payload:
-          additionalProperties: true
-          type: object
-          title: Payload
-          default: {}
         result:
           anyOf:
             - additionalProperties: true
@@ -284,19 +268,15 @@ components:
               format: date-time
             - type: 'null'
           title: Completed At
-        signaled_at:
-          anyOf:
-            - type: string
-              format: date-time
-            - type: 'null'
-          title: Signaled At
       type: object
       required:
+        - project_id
+        - request_id
         - work_correlation_id
-        - activity_handle
+        - status
         - created_at
       title: WorkItem
-      description: A unit of work written by the Temporal Worker and consumed by the Task Executor.
+      description: Safe execution state returned by EP through AO's authorized facade.
     WorkItemListResponse:
       properties:
         resources:
@@ -330,6 +310,8 @@ components:
         - pending
         - claimed
         - dispatched
+        - cancel_requested
+        - reconciliation_required
         - completed
         - failed
         - cancelled

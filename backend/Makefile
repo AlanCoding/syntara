@@ -20,6 +20,10 @@ APP_IMAGE ?= localhost/syntara:latest
 EP_IMAGE ?= localhost/execution-plane:latest
 EP_REPOSITORY ?= ../syntara-execution-plane
 EP_BUILD_CONTEXT ?= $(abspath $(EP_REPOSITORY))
+EP_DB_MIGRATOR_PASSWORD ?= ep-migrator
+EP_DB_RUNTIME_PASSWORD ?= ep-runtime
+EP_DATABASE_MIGRATOR_URL ?= postgresql+asyncpg://execution_plane_migrator:$(EP_DB_MIGRATOR_PASSWORD)@localhost:$${APP_DB_PORT:-5432}/execution_plane
+EP_DATABASE_RUNTIME_URL ?= postgresql+asyncpg://execution_plane_runtime:$(EP_DB_RUNTIME_PASSWORD)@localhost:$${APP_DB_PORT:-5432}/execution_plane
 APP_UI_IMAGE ?= quay.io/ansible/syntara-ui
 APP_UI_VERSION ?= latest
 XFAIL_ARGS := $(if $(SYNTARA_XFAIL_SOURCE),--xfail-from-url $(SYNTARA_XFAIL_SOURCE)backend.md,)
@@ -45,7 +49,7 @@ COMPOSE_FINAL_CMD := $(COMPOSE_CMD) $(COMPOSE_ARGS)
 S2S_TLS_VARS = \
 	APP_S2S_TLS_ENABLED=true \
 	APP_S2S_TLS_CA_CERT_PATH=.secrets/certs/ca.pem \
-	APP_S2S_TLS_CN_ALLOWLIST='["backend.ao.svc","worker.ao.svc","background-worker.ao.svc","temporal.ao.svc"]'
+	APP_S2S_TLS_CN_ALLOWLIST='["backend.ao.svc","worker.ao.svc","background-worker.ao.svc","temporal.ao.svc","execution-plane.ao.svc"]'
 WORKER_BASE_URL = https://localhost:8000/api/v1
 
 
@@ -113,7 +117,7 @@ test: test-unit ## Alias to unit tests
 
 .PHONY: test-unit
 test-unit: check-deps ## Run unit tests only
-	$(call run-tests,tests/unit/ tools/execution_plane/ -v -n auto)
+	$(call run-tests,tests/unit/ -v -n auto)
 
 .PHONY: test-api-compliance
 test-api-compliance: check-deps ## Run API compliance tests
@@ -153,13 +157,13 @@ endif
 .PHONY: test-unit-coverage
 test-unit-coverage: check-deps ## Run unit tests with coverage report
 	@echo "📊 Running unit tests with coverage..."
-	$(call run-tests,tests/unit/ tools/execution_plane/ -v -n auto --cov=src --cov=tools/execution_plane --cov-report=html:htmlcov-unit --cov-report=term --cov-config=pyproject.toml --cov-fail-under=85 --junitxml=pytest-results-unit.xml)
+	$(call run-tests,tests/unit/ -v -n auto --cov=src --cov-report=html:htmlcov-unit --cov-report=term --cov-config=pyproject.toml --cov-fail-under=85 --junitxml=pytest-results-unit.xml)
 	@echo "✅ Unit test coverage report: htmlcov-unit/index.html"
 
 .PHONY: test-cli-coverage
 test-cli-coverage: check-deps ## Run CLI tests with coverage report
 	@echo "📊 Running CLI tests with coverage..."
-	$(call run-tests,tests/cli/ tools/execution_plane/ -v -n auto --cov=src --cov=tools/execution_plane --cov-report=html:htmlcov-cli --cov-report=term --cov-config=pyproject.toml --cov-fail-under=0 --junitxml=pytest-results-cli.xml)
+	$(call run-tests,tests/cli/ -v -n auto --cov=src --cov-report=html:htmlcov-cli --cov-report=term --cov-config=pyproject.toml --cov-fail-under=0 --junitxml=pytest-results-cli.xml)
 	@echo "✅ CLI test coverage report: htmlcov-cli/index.html"
 
 .PHONY: test-integration-coverage
@@ -170,22 +174,22 @@ test-integration-coverage: check-deps ## Run integration tests with coverage rep
 
 .PHONY: test-coverage
 test-coverage: check-deps ## Run tests with combined coverage report (XML for CI)
-	$(call run-tests,tests/ tools/execution_plane/ -n auto -m "not mcp" --cov=src --cov=tools/execution_plane --cov-report=xml --cov-report=term --cov-config=pyproject.toml --junitxml=pytest-results.xml)
+	$(call run-tests,tests/ -n auto -m "not mcp" --cov=src --cov-report=xml --cov-report=term --cov-config=pyproject.toml --junitxml=pytest-results.xml)
 
 .PHONY: test-coverage-report
 test-coverage-report: check-deps ## Run tests with combined coverage report (HTML)
-	$(call run-tests,tests/ tools/execution_plane/ -n auto -m "not mcp" --cov=src --cov=tools/execution_plane --cov-report=html --cov-report=term --cov-config=pyproject.toml --junitxml=pytest-results.xml)
+	$(call run-tests,tests/ -n auto -m "not mcp" --cov=src --cov-report=html --cov-report=term --cov-config=pyproject.toml --junitxml=pytest-results.xml)
 
 .PHONY: test-fast
 test-fast: check-deps ## Run tests with fail-fast and short traceback
-	$(call run-tests,tests/ tools/execution_plane/ -x --tb=short)
+	$(call run-tests,tests/ -x --tb=short)
 
 .PHONY: test-all
 test-all: check-deps ## Run all tests (unit + integration; E2E runs separately via test-e2e)
 	# E2E tests require a full running stack (API, Temporal, MCP server) and are
 	# run by the dedicated `test-e2e` target; ignore them here so this target can
 	# run against the testcontainers-only environment.
-	$(call run-tests,tests/ tools/execution_plane/ -v -n auto -m "not mcp" --ignore=tests/e2e --cov=src --cov=tools/execution_plane --cov-config=pyproject.toml)
+	$(call run-tests,tests/ -v -n auto -m "not mcp" --ignore=tests/e2e --cov=src --cov-config=pyproject.toml)
 
 # _e2e-run: shared infrastructure setup for all e2e targets.
 # Starts mock Segment, database, Temporal, and the API server,
@@ -338,50 +342,38 @@ background-worker-run: check-deps _ensure-secrets _ensure-certs ## Run Temporal 
 .PHONY: ep-migrate
 ep-migrate: check-deps ## Apply execution_plane schema migrations (separate from main Syntara migrations)
 	@echo "🔄 Running execution_plane migrations..."
+	@$(COMPOSE_FINAL_CMD) up execution-plane-db-init
 	@cd $(EP_REPOSITORY) && \
-		DATABASE_URL=$${DATABASE_URL:-$${APP_DATABASE_URL:-postgresql+asyncpg://admin:admin@localhost:5432/syntara_api}} \
-		APP_ADMIN_PASSWORD_PATH=$(CURDIR)/.secrets/admin-password \
+		DATABASE_URL="$${EP_DATABASE_MIGRATOR_URL:-$(EP_DATABASE_MIGRATOR_URL)}" \
 		uv run alembic upgrade head
 	@echo "✅ execution_plane migrations complete"
 
-.PHONY: ep-worker-run
-# NOTE: uv run uses the Syntara development environment and the pinned EP package.
-# Build the standalone worker image from the sibling execution-plane checkout.
+.PHONY: ep-api-run ep-worker-run
+ep-api-run: check-deps _ensure-secrets ## Run the standalone Execution Plane API from its own checkout
+	@echo "🔄 Starting Execution Plane API on port 8001..."
+	@cd $(EP_REPOSITORY) && \
+		EP_DATABASE_URL="$${EP_DATABASE_URL:-$(EP_DATABASE_RUNTIME_URL)}" \
+		EP_AO_JWT_PUBLIC_KEY_PATH="$(abspath .secrets/jwt-primary.pub)" \
+		EP_AO_JWT_ISSUER="$${EP_AO_JWT_ISSUER:-https://0.0.0.0:8000}" \
+		EP_CREDENTIAL_ENCRYPTION_KEY_PATH="$(abspath .secrets/ep-credential-encryption-key)" \
+		EP_API_TLS_CERT_PATH="$(abspath .secrets/certs/execution-plane.crt)" \
+		EP_API_TLS_KEY_PATH="$(abspath .secrets/certs/execution-plane.key)" \
+		EP_API_TLS_CLIENT_CA_PATH="$(abspath .secrets/certs/ca.pem)" \
+		uv run python -m execution_plane.api.main
+
 ep-worker-run: check-deps _ensure-secrets _ensure-certs ## Run the standalone Execution Plane worker in the foreground
 	@echo "🔄 Starting Execution Plane worker..."
-	APP_DATABASE_URL=$${APP_DATABASE_URL:-postgresql+asyncpg://admin:admin@localhost:5432/syntara_api} \
-	APP_TEMPORAL_ADDRESS=$${APP_TEMPORAL_ADDRESS:-localhost:7233} \
-	APP_TEMPORAL_NAMESPACE=$${APP_TEMPORAL_NAMESPACE:-default} \
-	$(S2S_TLS_VARS) \
-	APP_S2S_TLS_CERT_PATH=.secrets/certs/worker.crt \
-	APP_S2S_TLS_KEY_PATH=.secrets/certs/worker.key \
-	uv run python -m execution_plane.worker
-
-# Execution Plane CLI tool
-# ========================================================
-
-# Pass additional arguments to the CLI, for example:
-#   make ep-dev-up EP_DEV_ARGS="--provider kind --cluster local"
-EP_DEV_ARGS ?=
-
-.PHONY: ep-dev-doctor ep-dev-status ep-dev-up ep-dev-down ep-dev-reset ep-dev-connect
-ep-dev-doctor: check-deps ## Check the selected Kubernetes development environment
-	@uv run python -m tools.execution_plane.dev_cli doctor $(EP_DEV_ARGS)
-
-ep-dev-status: check-deps ## Check connectivity to the selected Kubernetes development environment
-	@uv run python -m tools.execution_plane.dev_cli status $(EP_DEV_ARGS)
-
-ep-dev-up: check-deps ## Create/start and register the local Execution Plane Kubernetes cluster
-	@uv run python -m tools.execution_plane.dev_cli up $(EP_DEV_ARGS)
-
-ep-dev-down: check-deps ## Stop or remove the local Kubernetes development environment
-	@uv run python -m tools.execution_plane.dev_cli down $(EP_DEV_ARGS)
-
-ep-dev-reset: check-deps ## Recreate the local Kubernetes development environment
-	@uv run python -m tools.execution_plane.dev_cli reset --yes $(EP_DEV_ARGS)
-
-ep-dev-connect: check-deps ## Validate access to the configured remote OpenShift environment
-	@uv run python -m tools.execution_plane.dev_cli --provider openshift connect $(EP_DEV_ARGS)
+	@cd $(EP_REPOSITORY) && \
+		EP_DATABASE_URL="$${EP_DATABASE_URL:-$(EP_DATABASE_RUNTIME_URL)}" \
+		EP_CREDENTIAL_ENCRYPTION_KEY_PATH="$(abspath .secrets/ep-credential-encryption-key)" \
+		EP_COMPLETION_CALLBACK_URL="$${EP_COMPLETION_CALLBACK_URL:-https://localhost:8000/api/execution_plane/v1/events}" \
+		EP_WORKLOAD_RUNNER_IMAGE="$${EP_WORKLOAD_RUNNER_IMAGE:-}" \
+		EP_WORKLOAD_ALLOWED_EGRESS_CIDRS="$${EP_WORKLOAD_ALLOWED_EGRESS_CIDRS:-[]}" \
+		EP_WORKLOAD_FORBIDDEN_EGRESS_CIDRS="$${EP_WORKLOAD_FORBIDDEN_EGRESS_CIDRS:-[]}" \
+		EP_CALLBACK_CA_CERT_PATH="$(abspath .secrets/certs/ca.pem)" \
+		EP_CALLBACK_CERT_PATH="$(abspath .secrets/certs/execution-plane.crt)" \
+		EP_CALLBACK_KEY_PATH="$(abspath .secrets/certs/execution-plane.key)" \
+		uv run python -m execution_plane.worker
 
 # Database
 # ========================================================
@@ -449,7 +441,7 @@ build-images: ## Build container images for syntara, temporal-worker, and execut
 	@echo "📦 Building syntara image..."
 	$(COMPOSE_FINAL_CMD) build syntara
 	@echo "📦 Building execution-plane image from $(EP_REPOSITORY)..."
-	EP_BUILD_CONTEXT=$(EP_BUILD_CONTEXT) $(COMPOSE_FINAL_CMD) build execution-plane-worker
+	podman build -f "$(EP_BUILD_CONTEXT)/Containerfile" -t "$(EP_IMAGE)" "$(EP_BUILD_CONTEXT)"
 	@echo "✅ Container images built successfully"
 	@echo "   Syntara image:         $${APP_IMAGE:-localhost/syntara:latest}"
 	@echo "   Execution Plane image: $${EP_IMAGE:-localhost/execution-plane:latest}"
@@ -486,7 +478,7 @@ certs-generate-force: ## Regenerate TLS certificates (overwrites existing)
 _ensure-certs:
 	@missing=0; \
 	for f in ca.pem ca.key backend.crt backend.key worker.crt worker.key \
-		background-worker.crt background-worker.key temporal.crt temporal.key; do \
+		background-worker.crt background-worker.key temporal.crt temporal.key execution-plane.crt execution-plane.key; do \
 		if [ ! -f .secrets/certs/$$f ]; then missing=1; break; fi; \
 	done; \
 	if [ $$missing -eq 1 ]; then \
@@ -513,8 +505,6 @@ run-all: _ensure-secrets _ensure-certs ## Register the local EP cluster and star
 	@$(MAKE) db-seed
 	@$(MAKE) admin-password
 	@echo "✅ Migrations and seeding complete"
-	@$(MAKE) ep-dev-up
-	@echo "✅ Local Execution Plane cluster registered"
 	@echo "🚀 Starting all services..."
 	@echo "📍 Syntara API: http://localhost:$${APP_API_PORT:-8000}"
 	@echo "📍 Syntara UI: http://localhost:$${APP_UI_PORT:-8080}"
@@ -528,14 +518,14 @@ run-all: _ensure-secrets _ensure-certs ## Register the local EP cluster and star
 	$(COMPOSE_FINAL_CMD) up --build --force-recreate
 
 .PHONY: services-run
-services-run: _ensure-secrets _ensure-certs ## Start infrastructure services (database + cache + temporal + Syntara workers + MCP) in background
+services-run: _ensure-secrets _ensure-certs ## Start infrastructure services (including the separate EP database) in background
 	@echo "🚀 Starting infrastructure services (database + cache + temporal + Syntara workers + MCP)..."
 	@echo "📍 Database: postgresql://admin:admin@localhost:$${APP_DB_PORT:-5432}/syntara_api"
 	@echo "📍 Cache: cache://localhost:$${APP_CACHE_PORT:-6379}"
 	@echo "📍 Temporal Server: localhost:$${APP_TEMPORAL_PORT:-7233}"
 	@echo "📍 Temporal UI: http://localhost:$${APP_TEMPORAL_UI_PORT:-8081}"
 	@echo "📍 MCP Server: http://localhost:$${MCP_PORT:-8765}/mcp"
-	$(COMPOSE_FINAL_CMD) --profile mcp-scenarios up --build --force-recreate -d database redis temporal temporal-ui temporal-worker temporal-background-worker mcp-server mcp-server-scenarios moto
+	$(COMPOSE_FINAL_CMD) --profile mcp-scenarios up --build --force-recreate -d database execution-plane-db-init redis temporal temporal-ui temporal-worker temporal-background-worker mcp-server mcp-server-scenarios moto
 	@echo "✅ All services started in background"
 	@echo "   Use 'make services-logs' to view logs"
 	@echo "   Use 'make services-stop' to stop services"
@@ -827,7 +817,7 @@ lint: ## Run linters and type checking (no file modifications)
 .PHONY: typecheck
 typecheck: ## Run type checking only with mypy
 	@echo "🔍 Running type checking..."
-	uv run mypy --strict src/ tests/ tools/execution_plane/
+	uv run mypy --strict src/ tests/
 	uv run mypy --config-file test-sdk/pyproject.toml test-sdk/src/
 	@echo "✅ Type checking completed"
 

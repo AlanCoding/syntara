@@ -963,21 +963,6 @@ wheels = [
 ]
 
 [[package]]
-name = "execution-plane"
-version = "0.1.0"
-source = { git = "https://github.com/syntara-orchestration/syntara-execution-plane.git?rev=1b6a395f87280790aa1418ace366c880749b63f2#1b6a395f87280790aa1418ace366c880749b63f2" }
-dependencies = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "sqlmodel" },
-    { name = "structlog" },
-    { name = "temporalio" },
-]
-
-[[package]]
 name = "fastapi"
 version = "0.141.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4257,7 +4242,6 @@ dependencies = [
     { name = "boto3" },
     { name = "cachetools" },
     { name = "cryptography" },
-    { name = "execution-plane" },
     { name = "fastapi" },
     { name = "filelock" },
     { name = "httpx" },
@@ -4365,7 +4349,6 @@ requires-dist = [
     { name = "boto3-stubs", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=1.35.0" },
     { name = "cachetools", specifier = ">=5.0" },
     { name = "cryptography", specifier = ">=48.0.1" },
-    { name = "execution-plane", git = "https://github.com/syntara-orchestration/syntara-execution-plane.git?rev=1b6a395f87280790aa1418ace366c880749b63f2" },
     { name = "fastapi", specifier = ">=0.135.0" },
     { name = "fastmcp", marker = "extra == 'dev'", specifier = ">=3.2.0,<4.0.0" },
     { name = "filelock", specifier = ">=3.20.0" },

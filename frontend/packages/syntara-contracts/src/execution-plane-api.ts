@@ -98,25 +98,10 @@ export interface components {
         [key: string]: string
       }
       /**
-       * Created By
-       * Format: uuid
-       */
-      created_by: string
-      /**
        * Created At
        * Format: date-time
        */
       created_at: string
-      /**
-       * Updated By
-       * Format: uuid
-       */
-      updated_by: string
-      /**
-       * Updated At
-       * Format: date-time
-       */
-      updated_at: string
       /** Last Ran At */
       last_ran_at?: string | null
     }
@@ -160,7 +145,7 @@ export interface components {
     }
     /**
      * WorkItem
-     * @description A unit of work written by the Temporal Worker and consumed by the Task Executor.
+     * @description Safe execution state returned by EP through AO's authorized facade.
      */
     WorkItem: {
       /**
@@ -169,23 +154,21 @@ export interface components {
        */
       id?: string
       /**
+       * Project Id
+       * Format: uuid
+       */
+      project_id: string
+      /** Request Id */
+      request_id: string
+      /**
        * Work Correlation Id
        * Format: uuid
        */
       work_correlation_id: string
-      /** Activity Handle */
-      activity_handle: string
       /** @default pending */
-      status?: components['schemas']['WorkItemStatus']
+      status: components['schemas']['WorkItemStatus']
       /** Execution Target Id */
       execution_target_id?: string | null
-      /**
-       * Payload
-       * @default {}
-       */
-      payload?: {
-        [key: string]: unknown
-      }
       /** Result */
       result?: {
         [key: string]: unknown
@@ -199,8 +182,6 @@ export interface components {
       claimed_at?: string | null
       /** Completed At */
       completed_at?: string | null
-      /** Signaled At */
-      signaled_at?: string | null
     }
     /**
      * WorkItemListResponse
@@ -221,7 +202,15 @@ export interface components {
      * @description Lifecycle states of a dispatched work item.
      * @enum {string}
      */
-    WorkItemStatus: 'pending' | 'claimed' | 'dispatched' | 'completed' | 'failed' | 'cancelled'
+    WorkItemStatus:
+      | 'pending'
+      | 'claimed'
+      | 'dispatched'
+      | 'cancel_requested'
+      | 'reconciliation_required'
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
   }
   responses: never
   parameters: never
