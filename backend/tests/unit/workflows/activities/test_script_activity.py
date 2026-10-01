@@ -21,6 +21,9 @@ class _FakeEPClient:
     responses: ClassVar[list[dict[str, object] | Exception]] = []
     submissions: ClassVar[list[dict[str, object]]] = []
 
+    def __init__(self, *, timeout: float | None = None) -> None:
+        self.timeout = timeout
+
     async def __aenter__(self) -> Self:
         return self
 
