@@ -11,14 +11,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
+    from dev_cli import EnvironmentDetails
 
 
 def test_register_kind_sa_target_reads_token_and_registers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     token_file = tmp_path / "sa-token.txt"
     token_file.write_text("sa-token-value\n", encoding="utf-8")
-    registered: list[object] = []
+    registered: list[tuple[EnvironmentDetails, str]] = []
 
-    async def _fake_register(details: object, database_url: str) -> None:
+    async def _fake_register(details: EnvironmentDetails, database_url: str) -> None:
         registered.append((details, database_url))
 
     monkeypatch.setattr(register_kind_sa_target, "_register_environment_record", _fake_register)

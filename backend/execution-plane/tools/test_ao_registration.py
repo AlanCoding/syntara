@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Self
+from typing import Any, Self
 
 import ao_registration
 import pytest
@@ -113,9 +113,9 @@ async def test_register_integration_record_creates_credential_and_integration(
     added_types = {type(obj).__name__ for obj in session.added}
     assert "Credential" in added_types
     assert "Integration" in added_types
-    credential = next(obj for obj in session.added if type(obj).__name__ == "Credential")
+    credential: Any = next(obj for obj in session.added if type(obj).__name__ == "Credential")
     assert credential.created_by == _ADMIN_ID
-    integration = next(obj for obj in session.added if type(obj).__name__ == "Integration")
+    integration: Any = next(obj for obj in session.added if type(obj).__name__ == "Integration")
     assert integration.created_by == _ADMIN_ID
 
 
