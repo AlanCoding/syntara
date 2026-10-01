@@ -106,7 +106,7 @@ selection, secrets policy (none in the spec), retry classification.
 4. **RBAC.** Grant `batch`/`jobs`: `create, get, list, watch, delete`. Keep
    `pods`: `get, list, watch` and `pods/portforward`. `pods delete` is no longer
    required (the Job cascade handles it) but is harmless to keep. Update the
-   runbook's Role ([kind-demo-runbook.md](kind-demo-runbook.md) Step 2).
+   runbook's Role ([execution-plane-init.yaml](execution-plane-init.yaml)).
 
 5. **Tests.** `test_vanilla_k8s_transport.py` fakes the client, so no cluster is
    needed. Add a `BatchV1Api` fake with `create_namespaced_job`, make the
