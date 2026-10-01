@@ -249,7 +249,7 @@ real project). Options, in rough order of preference:
 
 Pick deliberately; this is a real divergence from "one small envelope".
 
-### 4.4 Job events: custom callbacks straight to gRPC — and the GB-output question
+### 4.4 Job events: one buffer, at the node — streamed straight to gRPC
 
 The design to pursue (and the one the team proposed): rather than run
 `ansible-runner worker` and parse its stdout stream, run ansible-runner **locally
@@ -277,20 +277,67 @@ partials live in RAM, never on real disk. Eliminating the partial entirely means
 modifying `awx_display`'s `IsolatedFileWrite` — a bigger lift, probably not worth it
 if the tmpfs answer holds.
 
-**Will it hold up in memory for many-GB output? As a *stream*, yes — with caveats.**
-The good news is there's genuine backpressure end to end, so total output does
-**not** accumulate in memory:
+**The design law: exactly one buffer, and it lives where the work runs.** We only
+want a buffer in the **remote execution location** (the pod). The EP side is
+**pass-through, not a staging area** — when the EP worker reads a line of output it
+goes **straight to Postgres**, and since the EP consumer is already asyncio it is a
+thin async pump, not a second buffer. The one genuinely intractable buffering need
+is the **network hop** (gRPC over the apiserver port-forward today; the receptor
+mesh for remote clusters, §4.5), so the buffer belongs at the **source** of that
+hop, not the destination. If the EP workers fall behind (Postgres slow, EP
+overloaded), we do **not** grow a control-side buffer — backpressure flows back
+across the hop and accumulates in the **same** node-side buffer, which spills to its
+disk tier and only throttles ansible as a last resort.
 
-- *ansible → handler is synchronous, no queue.* The handler is called inline on the
-  stdout-reading thread. If the gRPC push stalls, it blocks the stdout pump, which
-  (once the OS pipe buffer fills) blocks ansible itself. Events are throttled, not
-  buffered. (Consequence: a slow consumer *slows the job* — acceptable, but real.)
-- *our gRPC `Execute` is true server-streaming, read lazily* (`client.py` `for event
-  in call:`), delivering each `Progress` to the callback synchronously with HTTP/2
-  flow control. Nothing is drained into a list client-side.
+**Scorecard vs AWX.** AWX has **three** buffers: the execution-node buffer
+(workceptor writes the whole stdout stream to disk), a control-node buffer, and the
+Redis queue between the callback receiver and the database. This design **keeps 1 of
+the 3 and deletes the other 2** — no control-node buffer, no Redis — and the one it
+keeps is *better* than workceptor's: it holds the common case in RAM and spills only
+the overflow *tail* to disk, instead of writing the entire stream to disk.
 
-So memory is bounded by **the largest single event + the in-flight window**, not by
-the GB total. The caveats are the hard ceilings, and they are the real work:
+**The buffer already exists in PR 701 — it just can't spill.** PR 701
+(`feat/sdk-node-containers`, open) establishes the in-pod node runtime. In
+`backend/nodes/_shared/src/syntara_node_runtime/server.py`, `NodeService.Execute`
+already places a bounded, in-process, cross-thread buffer between producer and
+consumer: `events: queue.Queue[pb.ExecutionEvent | None] = queue.Queue(maxsize=128)`.
+
+- **Producer** — the executor on the `sdk-node-execution` worker thread (`run()` →
+  `runtime.execute()` → `node.run`), emitting via `send()`, which does
+  `events.put(event, timeout=0.1)` in a `while context.is_active()` loop catching
+  `queue.Full`. **This is today's backpressure point**: a full queue blocks `send()`,
+  which blocks the executor (and, for ansible, the `event_handler`).
+- **Buffer** — the `queue.Queue(maxsize=128)` itself.
+- **Consumer** — the `Execute` generator (a gRPC thread-pool worker, `max_workers=4`)
+  drains it, `events.get(timeout=0.1)` → `yield` → gRPC/HTTP-2; a `None` sentinel
+  ends the stream.
+
+So it is already **one process, two threads — no sidecar, no extra process.** The
+playbook is a child process of the node server; the node server is the gRPC host;
+the buffer is in-process.
+
+**The change your requirement implies is a near-drop-in swap of that one object.**
+Replace `queue.Queue(maxsize=128)` with a `SpillQueue(mem_bytes, disk_bytes,
+spill_dir)` keeping the **same** `put(timeout)` / `get(timeout)` / `Full` / `Empty` /
+`None`-sentinel contract, so `send()` and the generator are untouched:
+
+- a **byte-bounded** in-memory tier (not the current count-based 128 — events run up
+  to the 2 MiB cap, so 128 of them is a loose ~256 MiB bound); when it fills, append
+  new events to a **watermarked append-only spill file** and refill the head of the
+  mem tier as the consumer drains (hysteresis, strict FIFO — `job_events` ordering
+  must hold);
+- `.put()` then succeeds by writing to disk instead of raising `Full` until the
+  **disk tier is also full** — only then does it block (backpressure to ansible),
+  the correct last resort versus OOM or dropping events.
+
+**Pod-spec consequence (a real infra item).** The spill tier needs a **writable
+disk-backed `emptyDir`** mounted for `spill_dir`. Today's pod is read-only root plus
+a *memory*-backed `/tmp` tmpfs — memory tmpfs is still RAM, so spilling there
+defeats the purpose. Add a dedicated disk-backed volume (`sizeLimit` = `disk_bytes`),
+separate from the secrets tmpfs (§4.1), in PR 701's node `manifest.yaml` (and the
+cold-start `pod_body`); keep root FS read-only.
+
+With the buffer settled, the remaining ceilings are the real engineering:
 
 1. **Hard 2 MiB per-gRPC-message cap, no chunking.** `codec.py`
    `MAX_MESSAGE_BYTES = 2 MiB` is set as `grpc.max_receive_message_length`; any
@@ -311,25 +358,30 @@ the GB total. The caveats are the hard ceilings, and they are the real work:
    `Result` carries only terminal status / rc / stats (small). This is the natural
    shape and sidesteps the single-message limit for the bulk.
 
-3. **The consumer must actually keep up and persist incrementally.** Today
+3. **The EP consumer is pass-through to Postgres — no second buffer.** Today
    `on_progress` in `manager.py` just debug-logs and discards the event. For an
-   Ansible job it must become an **incremental persister** (store each event like
-   AWX's `JobEvent`, or forward to a stream) — and because it's synchronous with
-   backpressure, a slow persister throttles the job. If decoupling is needed, add a
-   **bounded** queue in the consumer (bounded, so memory stays capped; with an
-   explicit full-queue policy — block vs. drop).
+   Ansible job it becomes the **async pump → Postgres**: read event → write a
+   `JobEvent`-style row, with **no** control-side buffer of its own (the design law
+   above). Because it is the only consumer on the hop, if Postgres slows the pump
+   slows, the HTTP/2 window fills, and the node `SpillQueue` absorbs it (mem → disk)
+   — "buffers to the same location." A control-side bounded queue is explicitly
+   **not** wanted here; that is exactly the AWX Redis buffer we are deleting.
 
 4. **Pod resources.** Today's pod is `512Mi` memory with a `64Mi` memory `/tmp`
    (`pod_body`). Real ansible plus a tmpfs `private_data_dir` (project + transient
    partials) needs materially more — raise both, and keep the volume `medium:
    Memory` so nothing persists. (Overlaps §4.1 and the resource-limits gap.)
 
-**Net:** the custom-callback-to-gRPC model is the right one and is memory-safe *as a
-stream* thanks to two-sided backpressure. The actual engineering is (1) keeping
-every event under the 2 MiB message cap (or adding chunking), (2) streaming bulk
-output as events rather than in the `Result`, (3) an incremental, keep-up consumer,
-and (4) bigger pod/tmpfs limits. None of these is the "it all buffers in RAM"
-failure the GB-output worry implies — provided we never try to accumulate.
+**Net:** one buffer, at the node — in-memory with disk overflow, swapped in for PR
+701's existing in-process `queue.Queue(maxsize=128)`; the EP side streams straight to
+Postgres with no buffer of its own; and under overload backpressure flows back to
+that single node buffer. This is strictly leaner than AWX (3 buffers → 1) and beats
+workceptor by spilling only the overflow tail. The remaining engineering is (1)
+keeping every event under the 2 MiB message cap (or adding chunking), (2) streaming
+bulk output as events rather than in the `Result`, (3) the async pass-through
+consumer, and (4) bigger pod limits plus the disk-backed spill volume. None of this
+is the "it all buffers in RAM" failure the GB-output worry implies. **Scoped as its
+own story** (depends on PR 701 landing the node runtime).
 
 Separately, long Ansible runs stress the MVP's serial-dispatch (shortcut 7),
 fixed-timeout, and single-port-forward-per-call assumptions — size those for
@@ -357,6 +409,24 @@ precedent and our production transport converge.
 - Decide whether set_stats/fact-cache **artifacts** (AWX streams them back and
   persists them) are in scope; if so, the `Result`/progress contract must carry
   structured artifacts, not just stdout.
+
+### 4.7 Handing job-event output back to the AWX controller
+
+AWX persists job events in the **AWX database** and renders them from there. In this
+framework the **EP worker** owns the output stream and has no access to the AWX DB,
+so the EP→AWX handoff is unresolved. Two options, to be discussed (a separate future
+work item, like §4.4's spill-buffer story):
+
+1. **Output lives in the EP database** — fully moved out of the AWX DB (or a thin
+   proxy shims it into the AWX DB for temporary compatibility). Single source of
+   truth on the EP side; *the easiest answer and the likely one*, but it changes
+   where AWX reads events and needs sign-off.
+2. **EP hands the host & port to AWX**, and AWX runs its own output processing
+   against the node's gRPC stream. Keeps AWX's DB authoritative but duplicates the
+   consumer and re-couples AWX to the node transport.
+
+Lean toward (1); flag (2) so the tradeoff is explicit. Either way this is the EP↔AWX
+seam, not an in-pod concern.
 
 ---
 
@@ -402,7 +472,8 @@ swap itself.
 1. Secrets-at-rest for `work_items.payload` (shortcut 1) — unblocks everything.
 2. `ansible-job` node type + in-pod runtime wrapping local ansible-runner (§4.2),
    secrets materialized on tmpfs over `credentials_json` (§4.1 Goal A).
-3. Project delivery (§4.3) and incremental event persistence (§4.4).
+3. Project delivery (§4.3), the node-side spill buffer + event streaming (§4.4),
+   and the EP↔AWX output handoff (§4.7).
 4. mTLS-to-pod (near-term transport) then the receptor/mesh transport for
    multi-cluster (§4.5), with optional payload encryption (§4.1 Goal B).
 
@@ -413,6 +484,11 @@ swap itself.
 - This framework: [cold-start-node-dispatch.md](cold-start-node-dispatch.md),
   [worker-manager.md](worker-manager.md), [integration.md](integration.md),
   [kind-demo-runbook.md](kind-demo-runbook.md).
+- Node runtime (PR 701, `feat/sdk-node-containers`, open):
+  `backend/nodes/_shared/src/syntara_node_runtime/server.py` (the `NodeService.Execute`
+  queue — the buffer to make spillable), `.../runtime.py` (executor/`send` contract),
+  `backend/nodes/aap-job/...` (today's remote-controller AAP executor, httpx launch +
+  poll — not a local ansible-runner).
 - AWX (`~/repos/awx/`): `awx/main/tasks/receptor.py` (AWXReceptorJob, pod
   definition, work types, transmit/process), `awx/main/tasks/jobs.py`
   (private_data_dir, credential injection), `awx/main/utils/execution_environments.py`
