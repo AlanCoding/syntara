@@ -230,8 +230,9 @@ kubectl --server="https://127.0.0.1:$PORT" --insecure-skip-tls-verify \
 ref:
 
 ```bash
-podman save -o /tmp/node-script.tar localhost/syntara-node-script:migration-test
-kind load image-archive /tmp/node-script.tar --name execution-plane
+# /var/tmp is disk-backed; /tmp is often a tmpfs RAM disk too small for an image.
+podman save -o /var/tmp/node-script.tar localhost/syntara-node-script:migration-test
+kind load image-archive /var/tmp/node-script.tar --name execution-plane
 # verify:
 podman exec execution-plane-control-plane crictl images | grep node-script
 ```
@@ -405,6 +406,11 @@ kubernetes-client ≥36 with Bearer-token targets hit it.
   `$BASE_COMPOSE up -d database redis temporal`).
 - **`missing networks: kind`** — the override was used before the kind cluster
   existed. Create the cluster (Step 3) first, then retry Step 7.
+- **`credentials_created_by_fkey` / `Key (created_by)=(00000000-…)`** — `ep-dev-up`
+  used to attribute the OpenShift credential to the nil UUID, which is not a
+  row in `principals`. It now uses the seeded `admin` user. Re-run Step 3 after
+  pulling that fix; if it still fails with "Bootstrap admin user not found",
+  run `make -C backend db-seed`.
 - **`relation "execution_plane.clusters" does not exist`** — the EP Alembic tree
   was not applied. Run `make -C backend ep-migrate` (Step 2).
 - **`node(s) already exist for a cluster with the name "execution-plane"`** —

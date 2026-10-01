@@ -15,6 +15,11 @@ _NAMESPACE = "execution-plane"
 _API_KEY = "test-token"
 _DATABASE_URL = "postgresql+asyncpg://localhost/syntara_api"
 _ACTOR_ID = uuid.UUID(int=0)
+_ADMIN_ID = uuid.uuid4()
+
+
+def _fake_admin() -> object:
+    return type("User", (), {"id": _ADMIN_ID, "username": "admin"})()
 
 
 class _FakeResult:
@@ -86,7 +91,7 @@ async def test_register_integration_record_creates_credential_and_integration(
 ) -> None:
     bearer_type = _fake_credential_type()
     project = _fake_project()
-    session = _SQLModelSession([bearer_type, project, None, None])
+    session = _SQLModelSession([bearer_type, project, _fake_admin(), None, None])
     secret_id = uuid.uuid4()
     secret_service = _FakeSecretService(secret_id)
 
@@ -108,6 +113,10 @@ async def test_register_integration_record_creates_credential_and_integration(
     added_types = {type(obj).__name__ for obj in session.added}
     assert "Credential" in added_types
     assert "Integration" in added_types
+    credential = next(obj for obj in session.added if type(obj).__name__ == "Credential")
+    assert credential.created_by == _ADMIN_ID
+    integration = next(obj for obj in session.added if type(obj).__name__ == "Integration")
+    assert integration.created_by == _ADMIN_ID
 
 
 @pytest.mark.asyncio
@@ -132,7 +141,7 @@ async def test_register_integration_record_updates_existing_records(
             "updated_by": None,
         },
     )()
-    session = _SQLModelSession([bearer_type, project, existing_credential, existing_integration])
+    session = _SQLModelSession([bearer_type, project, _fake_admin(), existing_credential, existing_integration])
     secret_service = _FakeSecretService(uuid.uuid4())
 
     monkeypatch.setattr(ao_registration, "create_async_engine", lambda *_: _FakeEngine())
@@ -150,7 +159,7 @@ async def test_register_integration_record_updates_existing_records(
 
     assert secret_service.update_calls == [(secret_id, {"token": "new-token"})]
     assert secret_service.create_calls == []
-    assert existing_integration.updated_by == _ACTOR_ID
+    assert existing_integration.updated_by == _ADMIN_ID
     assert session.commits == 1
 
 
@@ -185,6 +194,28 @@ async def test_register_integration_record_fails_when_default_project_missing(
     monkeypatch.setattr(ao_registration, "create_secret_service", lambda _: _FakeSecretService(uuid.uuid4()))
 
     with pytest.raises(RuntimeError, match="Default project not found"):
+        await register_integration_record(
+            name=_NAME,
+            endpoint=_ENDPOINT,
+            namespace=_NAMESPACE,
+            api_key=_API_KEY,
+            actor_id=_ACTOR_ID,
+            database_url=_DATABASE_URL,
+        )
+
+
+@pytest.mark.asyncio
+async def test_register_integration_record_fails_when_admin_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bearer_type = _fake_credential_type()
+    project = _fake_project()
+    session = _SQLModelSession([bearer_type, project, None])
+    monkeypatch.setattr(ao_registration, "create_async_engine", lambda *_: _FakeEngine())
+    monkeypatch.setattr(ao_registration, "async_sessionmaker", lambda *_, **__: lambda: session)
+    monkeypatch.setattr(ao_registration, "create_secret_service", lambda _: _FakeSecretService(uuid.uuid4()))
+
+    with pytest.raises(RuntimeError, match="Bootstrap admin user not found"):
         await register_integration_record(
             name=_NAME,
             endpoint=_ENDPOINT,
