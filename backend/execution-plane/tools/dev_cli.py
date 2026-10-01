@@ -398,17 +398,24 @@ def _run_local_environment(
         _remove_environment(provider=provider, cluster=cluster)
 
 
+def _kind_cluster_names(runner: CommandRunner) -> set[str]:
+    """Return kind cluster names from `kind get clusters` stdout."""
+    result = _run_command(runner, ["kind", "get", "clusters"])
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 def _run_kind_command(runner: CommandRunner, command: str, cluster: str) -> None:
     if command in {"doctor", "status"}:
-        result = _run_command(runner, ["kind", "get", "clusters"])
-        clusters = {line.strip() for line in result.stdout.splitlines() if line.strip()}
-        if cluster not in clusters:
+        if cluster not in _kind_cluster_names(runner):
             raise EnvironmentSelectionError(f"kind cluster '{cluster}' was not found; run 'up' to create it")
         print(f"kind cluster '{cluster}' is available.")
     if command in {"down", "reset"}:
         _run_command(runner, ["kind", "delete", "cluster", "--name", cluster])
     if command in {"up", "reset"}:
-        _run_command(runner, ["kind", "create", "cluster", "--name", cluster])
+        if command == "up" and cluster in _kind_cluster_names(runner):
+            print(f"kind cluster '{cluster}' already exists; reusing it.")
+        else:
+            _run_command(runner, ["kind", "create", "cluster", "--name", cluster])
 
 
 def _run_minikube_command(runner: CommandRunner, command: str, profile: str) -> None:
