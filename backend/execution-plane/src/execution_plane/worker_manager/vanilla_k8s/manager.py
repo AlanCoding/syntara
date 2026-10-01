@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 from execution_plane.worker_manager.vanilla_k8s.transport import TransportError, run_pod
 
 if TYPE_CHECKING:
@@ -108,14 +109,18 @@ class VanillaK8sWorkerManager:
     def _k8s_target(self, target: ExecutionTarget) -> dict[str, Any]:
         """Map an ExecutionTarget onto the connection dict run_pod expects.
 
-        This is the single place that reads target topology fields. Michael is
-        moving ``namespace`` (and node selectors/tolerations) into a backend-specific
-        metadata block with a K8s/RHEL discriminator; when that lands, only this
-        method changes.
+        This is the single place that reads target topology fields. Namespace (and
+        node selectors/tolerations) live in the backend-specific ``placement`` block
+        under a K8s/RHEL discriminator (AAP-95135); this manager only handles the
+        Kubernetes variant.
         """
+        placement = target.placement
+        if not isinstance(placement, KubernetesPlacement):
+            message = f"vanilla-k8s manager requires a Kubernetes placement, got {placement.type!r}"
+            raise WorkItemPayloadError(message)
         return {
             "base_url": target.endpoint,
-            "namespace": target.namespace,
+            "namespace": placement.namespace,
             "token": target.api_key,
             "ca_certificate": self._settings.node_k8s_ca_certificate or None,
             "verify_ssl": self._settings.node_k8s_verify_ssl,
