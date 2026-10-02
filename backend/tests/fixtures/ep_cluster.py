@@ -11,8 +11,11 @@ variables:
   transport requires a token; a kubeconfig/client-cert will not work)
 * ``EP_IT_K8S_NAMESPACE`` — target namespace (default ``execution-plane``)
 
-When those are absent there is no cluster to run a pod on, so the EP-dispatch tests
-skip (see :func:`ep_cluster_configured`).
+The integration CI job always stands up a kind cluster and sets these, so the
+suite runs against a real cluster. When they are absent (e.g. a local run without
+a cluster), :func:`ep_cluster_configured` reports ``False`` and the ``temporal_env``
+fixture skips target registration, leaving non-EP integration tests runnable while
+the script-dispatch tests fail for lack of a cluster.
 
 The actual Cluster/ExecutionTarget provisioning is delegated to the EP dev tooling
 (``dev_cli._register_environment_record``) so the test path and the developer
@@ -35,11 +38,6 @@ TOKEN_ENV = "EP_IT_K8S_TOKEN"  # noqa: S105 — env var *name*, not a secret val
 NAMESPACE_ENV = "EP_IT_K8S_NAMESPACE"
 DEFAULT_NAMESPACE = "execution-plane"
 CLUSTER_NAME = "integration-test"
-
-SKIP_REASON = (
-    "Execution Plane script dispatch needs a Kubernetes cluster; set "
-    f"{ENDPOINT_ENV}/{TOKEN_ENV} (see .github/workflows and the kind-demo runbook)"
-)
 
 
 def ep_cluster_configured() -> bool:
