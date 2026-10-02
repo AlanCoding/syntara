@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 from execution_plane.worker_manager.vanilla_k8s import manager as manager_module
 from execution_plane.worker_manager.vanilla_k8s.manager import (
     NodeExecutionError,
@@ -134,7 +135,7 @@ def _target(*, enabled: bool = True) -> MagicMock:
     target = MagicMock()
     target.enabled = enabled
     target.endpoint = "https://api.cluster.local:6443"
-    target.namespace = "execution"
+    target.placement = KubernetesPlacement(namespace="execution")
     target.api_key = "secret-token"
     return target
 
