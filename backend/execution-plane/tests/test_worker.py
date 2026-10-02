@@ -77,5 +77,5 @@ async def _finished_listener(_database_url: str, _wakeup_event: object) -> None:
     return None
 
 
-async def _finished_poller(_store: object, _wakeup_event: object, _completion_callback: object) -> None:
+async def _finished_poller(*_args: object, **_kwargs: object) -> None:
     return None

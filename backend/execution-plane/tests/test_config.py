@@ -1,7 +1,7 @@
 """Tests for execution-plane configuration."""
 
 import pytest
-from execution_plane.config import EPSettings, ScriptExecutorSettings, to_asyncpg_url
+from execution_plane.config import EPSettings, to_asyncpg_url
 
 
 def test_to_asyncpg_url_normalizes_postgresql_driver_variants() -> None:
@@ -19,55 +19,51 @@ def test_to_asyncpg_url_normalizes_postgresql_driver_variants() -> None:
     )
 
 
-class TestScriptExecutorSettingsDefaults:
-    """Default values match the hardcoded literals they replaced."""
+class TestEPSettingsNodeDispatchDefaults:
+    """Node pod dispatch settings default to safe, production-oriented values."""
 
-    def test_script_cleanup_terminate_timeout_default(self) -> None:
-        assert ScriptExecutorSettings().script_cleanup_terminate_timeout == 1.0
+    def test_node_startup_seconds_default(self) -> None:
+        assert EPSettings().node_startup_seconds == 120  # type: ignore[call-arg]
 
-    def test_script_cleanup_kill_timeout_default(self) -> None:
-        assert ScriptExecutorSettings().script_cleanup_kill_timeout == 0.5
+    def test_node_grace_seconds_default(self) -> None:
+        assert EPSettings().node_grace_seconds == 30  # type: ignore[call-arg]
 
-    def test_max_env_var_length_default(self) -> None:
-        assert ScriptExecutorSettings().max_env_var_length == 32768
+    def test_node_k8s_verify_ssl_defaults_true(self) -> None:
+        assert EPSettings().node_k8s_verify_ssl is True  # type: ignore[call-arg]
 
-    def test_temporal_blob_size_error_default(self) -> None:
-        assert ScriptExecutorSettings().temporal_blob_size_error == 2_097_152
+    def test_node_k8s_ca_certificate_defaults_none(self) -> None:
+        assert EPSettings().node_k8s_ca_certificate is None  # type: ignore[call-arg]
 
-    def test_temporal_payload_max_bytes_is_ninety_percent_of_blob_size_error(self) -> None:
-        settings = ScriptExecutorSettings()
-        assert settings.temporal_payload_max_bytes == int(settings.temporal_blob_size_error * 0.9)
-
-
-class TestScriptExecutorSettingsEnvVars:
-    """Script execution settings are overridable via environment variables."""
-
-    def test_script_cleanup_terminate_timeout_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SCRIPT_CLEANUP_TERMINATE_TIMEOUT", "5.0")
-        assert ScriptExecutorSettings().script_cleanup_terminate_timeout == 5.0
-
-    def test_script_cleanup_kill_timeout_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SCRIPT_CLEANUP_KILL_TIMEOUT", "2.0")
-        assert ScriptExecutorSettings().script_cleanup_kill_timeout == 2.0
-
-    def test_max_env_var_length_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MAX_ENV_VAR_LENGTH", "65536")
-        assert ScriptExecutorSettings().max_env_var_length == 65536
-
-    def test_temporal_blob_size_error_from_env_propagates_to_payload_max(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("TEMPORAL_BLOB_SIZE_ERROR", "4194304")  # 4 MB
-        settings = ScriptExecutorSettings()
-        assert settings.temporal_blob_size_error == 4_194_304
-        assert settings.temporal_payload_max_bytes == int(4_194_304 * 0.9)
+    def test_dispatch_retry_backoff_seconds_default(self) -> None:
+        assert EPSettings().dispatch_retry_backoff_seconds == 5.0  # type: ignore[call-arg]
 
 
-class TestEPSettingsInheritsScriptSettings:
-    """EPSettings exposes the same script fields via inheritance."""
+class TestEPSettingsNodeDispatchEnvVars:
+    """Node pod dispatch settings are overridable via environment variables."""
 
-    def test_ep_settings_has_script_cleanup_terminate_timeout(self) -> None:
+    def test_node_startup_seconds_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NODE_STARTUP_SECONDS", "300")
+        assert EPSettings().node_startup_seconds == 300  # type: ignore[call-arg]
+
+    def test_node_k8s_verify_ssl_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NODE_K8S_VERIFY_SSL", "false")
+        assert EPSettings().node_k8s_verify_ssl is False  # type: ignore[call-arg]
+
+    def test_dispatch_retry_backoff_seconds_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DISPATCH_RETRY_BACKOFF_SECONDS", "1.5")
+        assert EPSettings().dispatch_retry_backoff_seconds == 1.5  # type: ignore[call-arg]
+
+
+class TestEPSettingsDatabaseUrl:
+    """The database URL accepts either alias and derives an asyncpg variant."""
+
+    def test_accepts_app_database_url_alias(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv("APP_DATABASE_URL", "postgresql+asyncpg://user:password@localhost/syntara")
         settings = EPSettings()  # type: ignore[call-arg]
-        assert settings.script_cleanup_terminate_timeout == 1.0
+        assert settings.database_url == "postgresql+asyncpg://user:password@localhost/syntara"
 
-    def test_ep_settings_has_temporal_payload_max_bytes(self) -> None:
+    def test_database_url_asyncpg_strips_driver(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:password@localhost/syntara")
         settings = EPSettings()  # type: ignore[call-arg]
-        assert settings.temporal_payload_max_bytes == int(2_097_152 * 0.9)
+        assert settings.database_url_asyncpg == "postgresql://user:password@localhost/syntara"

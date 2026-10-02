@@ -9,22 +9,25 @@ exercises the full SDK code path (serialization, batching, queuing)
 without mocking, while ensuring the consumer threads never block on
 TCP timeouts so ``shutdown()`` returns promptly.
 
-Each iteration calls the execution-plane script executor directly, including
-subprocess creation, environment setup, and output handling. This measures
-telemetry overhead against real script execution without requiring a Temporal
-activity context or measuring asynchronous dispatch instead of execution.
+Each iteration runs a representative bash subprocess workload directly,
+including subprocess creation and output handling. This measures telemetry
+overhead against real subprocess work without requiring a Temporal activity
+context or the Execution Plane dispatch path. (Script nodes now execute in a
+cold-start node container over gRPC; see
+docs/execution-plane/cold-start-node-dispatch.md.)
 
 Run with: make test-integration-coverage
 """
 
+import asyncio
 import os
 import statistics
+import subprocess
 import time
 import uuid
 
 import pytest
 import structlog
-from execution_plane.script_executor import execute_script
 
 from syntara.audit.dispatcher import AuditEventDispatcher
 from syntara.telemetry.client import TelemetryClientRegistry
@@ -63,21 +66,22 @@ _ACTIVITY_DEFS: list[dict[str, object]] = [
     for i in range(_ACTIVITIES_PER_WORKFLOW)
 ]
 
-# Script config passed to the execution-plane executor.
+# Representative lightweight workload for the overhead baseline.
 # The script performs a SHA-256 hash computation to simulate a lightweight
 # but realistic workload.  Real activities (API calls, AAP job templates)
 # take 100 ms to minutes; this is intentionally fast to stress the overhead
 # measurement while remaining representative of actual subprocess work.
-_SCRIPT_CONFIG: dict[str, str] = {
-    "language": "bash",
-    "code": 'for i in $(seq 1 5); do echo "payload-$i" | sha256sum > /dev/null; done',
-}
+# Script execution itself now happens in a cold-start node container over gRPC
+# (see docs/execution-plane/cold-start-node-dispatch.md); this test only needs a
+# comparable subprocess workload to measure telemetry overhead against, so it
+# runs the bash directly rather than through the Execution Plane dispatch path.
+_SCRIPT_CODE = 'for i in $(seq 1 5); do echo "payload-$i" | sha256sum > /dev/null; done'
 
 
 async def _run_workflow_activities() -> None:
     """Execute real bash script activities like a workflow would."""
     for _ in range(_ACTIVITIES_PER_WORKFLOW):
-        await execute_script(_SCRIPT_CONFIG, None)
+        await asyncio.to_thread(subprocess.run, ["/bin/bash", "-c", _SCRIPT_CODE], check=True, capture_output=True)
 
 
 async def _run_baseline(iterations: int) -> list[float]:

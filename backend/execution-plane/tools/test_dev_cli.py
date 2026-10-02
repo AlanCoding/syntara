@@ -210,20 +210,34 @@ def test_detects_installed_local_providers_without_shell_commands() -> None:
 
 
 def test_kind_up_creates_the_requested_cluster() -> None:
-    runner = FakeRunner()
+    runner = FakeRunner(CommandResult(0, ""))
 
     assert main(["--provider", "kind", "up"], runner=runner, executable_exists=executable_checker("kind")) == 0
 
-    assert runner.commands == [("kind", "create", "cluster", "--name", "execution-plane")]
+    assert runner.commands == [
+        ("kind", "get", "clusters"),
+        ("kind", "create", "cluster", "--name", "execution-plane"),
+    ]
+
+
+def test_kind_up_reuses_an_existing_cluster() -> None:
+    runner = FakeRunner(CommandResult(0, "execution-plane\n"))
+
+    assert main(["--provider", "kind", "up"], runner=runner, executable_exists=executable_checker("kind")) == 0
+
+    assert runner.commands == [("kind", "get", "clusters")]
 
 
 def test_mixed_case_provider_environment_value_is_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EP_DEV_PROVIDER", "KIND")
-    runner = FakeRunner()
+    runner = FakeRunner(CommandResult(0, ""))
 
     assert main(["up"], runner=runner, executable_exists=executable_checker("kind")) == 0
 
-    assert runner.commands == [("kind", "create", "cluster", "--name", "execution-plane")]
+    assert runner.commands == [
+        ("kind", "get", "clusters"),
+        ("kind", "create", "cluster", "--name", "execution-plane"),
+    ]
 
 
 def test_minikube_down_stops_and_deletes_the_requested_profile() -> None:
@@ -390,10 +404,29 @@ def test_openshift_connect_registers_the_connected_environment(monkeypatch: pyte
 def test_kind_up_registers_the_connected_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     registered: list[dict[str, object]] = []
     monkeypatch.setattr(dev_cli, "_register_environment", lambda **kwargs: registered.append(kwargs))
-    runner = FakeRunner()
+    runner = FakeRunner(CommandResult(0, ""))
 
     assert main(["--provider", "kind", "up"], runner=runner, executable_exists=executable_checker("kind")) == 0
 
+    assert registered == [
+        {
+            "provider": EnvironmentProvider.KIND,
+            "cluster": "execution-plane",
+            "namespace": "execution-plane",
+            "context": None,
+            "runner": runner,
+        }
+    ]
+
+
+def test_kind_up_registers_when_reusing_an_existing_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    registered: list[dict[str, object]] = []
+    monkeypatch.setattr(dev_cli, "_register_environment", lambda **kwargs: registered.append(kwargs))
+    runner = FakeRunner(CommandResult(0, "execution-plane\nother\n"))
+
+    assert main(["--provider", "kind", "up"], runner=runner, executable_exists=executable_checker("kind")) == 0
+
+    assert runner.commands == [("kind", "get", "clusters")]
     assert registered == [
         {
             "provider": EnvironmentProvider.KIND,
