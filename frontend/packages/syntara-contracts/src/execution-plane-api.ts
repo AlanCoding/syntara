@@ -135,8 +135,8 @@ export interface components {
       backend_type: string
       /** Endpoint */
       endpoint: string
-      /** Namespace */
-      namespace: string
+      /** Placement */
+      placement: components['schemas']['KubernetesPlacement'] | components['schemas']['RHELPlacement']
       /** Status */
       status: string
       /** Enabled */
@@ -156,6 +156,28 @@ export interface components {
       created_at: string
       /** Last Ran At */
       last_ran_at?: string | null
+    }
+    /** KubernetesPlacement */
+    KubernetesPlacement: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'kubernetes'
+      /** Namespace */
+      namespace: string
+      /** Node Selectors */
+      node_selectors?: string[]
+      /** Tolerations */
+      tolerations?: string[]
+    }
+    /** RHELPlacement */
+    RHELPlacement: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'rhel'
     }
     /**
      * ExecutionTargetListResponse
