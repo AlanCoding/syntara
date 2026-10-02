@@ -166,6 +166,11 @@ test-integration-coverage: check-deps ## Run integration tests with coverage rep
 	$(call run-tests,tests/integration/ -v -n auto -m "not mcp" --cov=src --cov=execution-plane/src --cov-report=html:htmlcov-integration --cov-report=term --cov-config=pyproject.toml --cov-fail-under=0 --junitxml=pytest-results-integration.xml)
 	@echo "✅ Integration test coverage report: htmlcov-integration/index.html"
 
+.PHONY: test-integration-ep-cluster
+test-integration-ep-cluster: check-deps ## Run EP-dispatch integration tests against a real Kubernetes cluster (needs EP_IT_K8S_* env)
+	@echo "☸️  Running Execution Plane dispatch integration tests against the configured cluster..."
+	$(call run-tests,tests/integration/workflows/workflow_engine/services/ tests/integration/workflows/services/test_execution_service_integration.py -v -n 2 -m "not mcp" --junitxml=pytest-results-integration-k8s.xml)
+
 .PHONY: test-coverage
 test-coverage: check-deps ## Run tests with combined coverage report (XML for CI)
 	$(call run-tests,tests/ execution-plane/tests/ execution-plane/tools/ -n auto -m "not mcp" --cov=src --cov=execution-plane/src --cov=execution-plane/tools --cov-report=xml --cov-report=term --cov-config=pyproject.toml --junitxml=pytest-results.xml)

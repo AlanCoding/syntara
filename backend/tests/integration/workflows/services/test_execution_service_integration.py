@@ -20,6 +20,8 @@ from syntara.workflows.workflow_engine.activities.manual_trigger import manual_t
 from syntara.workflows.workflow_engine.activities.runtime_settings_activity import fetch_workflow_runtime_settings
 from syntara.workflows.workflow_engine.dynamic_workflow import OrchestratorWorkflow
 from syntara.workflows.workflow_engine.services.temporal_execution_service import TemporalExecutionService
+from tests.fixtures.ep_cluster import SKIP_REASON as EP_CLUSTER_SKIP_REASON
+from tests.fixtures.ep_cluster import ep_cluster_configured
 
 
 @pytest_asyncio.fixture
@@ -48,12 +50,9 @@ TEST_WORKFLOW_METADATA = {
 
 # These tests dispatch a real `script` node through the Execution Plane, which needs
 # a Kubernetes (kind) cluster plus a reachable node container image to run the pod
-# and resume the activity. CI's integration job has no cluster (and registers only a
-# placeholder `local://` target), so the dispatch can't complete. This coverage moves
-# with the Execution Plane code to its own repository; see AAP-93615.
-_EP_DISPATCH_SKIP = pytest.mark.skip(
-    reason="Execution Plane script dispatch requires a kind cluster + node image not present in CI (AAP-93615)"
-)
+# and resume the activity. They run for real when a cluster is configured (CI's kind
+# job, or a local kind cluster — see tests.fixtures.ep_cluster) and skip otherwise.
+_EP_DISPATCH_SKIP = pytest.mark.skipif(not ep_cluster_configured(), reason=EP_CLUSTER_SKIP_REASON)
 
 
 @pytest.mark.integration

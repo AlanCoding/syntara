@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.fixtures.ep_cluster import SKIP_REASON as EP_CLUSTER_SKIP_REASON
+from tests.fixtures.ep_cluster import ep_cluster_configured
 from tests.fixtures.settings import FakeSettingsCache, enable_script_nodes
 
 if TYPE_CHECKING:
@@ -65,10 +67,14 @@ _EP_DISPATCH_TESTS = frozenset(
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Skip EP script-dispatch tests that require a kind cluster absent from CI (AAP-93615)."""
-    skip_marker = pytest.mark.skip(
-        reason="Execution Plane script dispatch requires a kind cluster + node image not present in CI (AAP-93615)"
-    )
+    """Skip EP script-dispatch tests only when no Kubernetes cluster is configured.
+
+    When a cluster is available (CI's kind job, or a local kind cluster — see
+    ``tests.fixtures.ep_cluster``) these tests run for real against it.
+    """
+    if ep_cluster_configured():
+        return
+    skip_marker = pytest.mark.skip(reason=EP_CLUSTER_SKIP_REASON)
     for item in items:
         if getattr(item, "originalname", item.name) in _EP_DISPATCH_TESTS:
             item.add_marker(skip_marker)
