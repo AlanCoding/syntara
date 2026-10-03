@@ -502,15 +502,17 @@ jobs:
       - name: Provision dispatcher ServiceAccount and RBAC
         run: kubectl apply -f backend/docs/execution-plane/execution-plane-init.yaml
 
-      # Load the script node image onto the kind node up front. The node pod uses
+      # Pre-pull the script node image onto the kind node up front. The node pod uses
       # imagePullPolicy: IfNotPresent, so with the image already present it starts
       # immediately instead of racing a cold registry pull against the test's result
-      # wait while the full integration suite saturates the runner.
-      - name: Pre-load the script node image into kind
+      # wait while the full integration suite saturates the runner. The node's
+      # containerd pulls the public image directly (crictl into the k8s.io namespace
+      # kubelet checks); `kind load` is avoided because exporting a multi-arch image
+      # from the docker daemon fails with "content digest not found".
+      - name: Pre-pull the script node image into kind
         run: |
-          image="quay.io/ahetheri/syntara-node-script:migration-test"
-          docker pull "$image"
-          kind load docker-image "$image" --name integration-test
+          docker exec integration-test-control-plane \
+            crictl pull quay.io/ahetheri/syntara-node-script:migration-test
 
       - name: Export cluster coordinates for the test suite
         run: |
