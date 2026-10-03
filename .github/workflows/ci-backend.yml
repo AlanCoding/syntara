@@ -502,6 +502,16 @@ jobs:
       - name: Provision dispatcher ServiceAccount and RBAC
         run: kubectl apply -f backend/docs/execution-plane/execution-plane-init.yaml
 
+      # Load the script node image onto the kind node up front. The node pod uses
+      # imagePullPolicy: IfNotPresent, so with the image already present it starts
+      # immediately instead of racing a cold registry pull against the test's result
+      # wait while the full integration suite saturates the runner.
+      - name: Pre-load the script node image into kind
+        run: |
+          image="quay.io/ahetheri/syntara-node-script:migration-test"
+          docker pull "$image"
+          kind load docker-image "$image" --name integration-test
+
       - name: Export cluster coordinates for the test suite
         run: |
           endpoint="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
