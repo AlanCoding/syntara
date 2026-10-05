@@ -510,11 +510,15 @@ jobs:
           printf '[Service]\nDelegate=yes\n' \
             | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
           sudo systemctl daemon-reload
-          # Enable lingering so systemd starts a persistent user session with a
-          # proper cgroup hierarchy. Without this, the rootless network process
-          # (pasta/slirp4netns) ends up in a cgroup the user cannot signal, causing
-          # "kill network process: permission denied" during container cleanup.
-          sudo loginctl enable-linger "$(id -un)"
+          # Use the cgroupfs cgroup manager instead of systemd. On GitHub Actions
+          # runners the runner process lives in a system-slice cgroup, not the user's
+          # systemd session, so the rootless network process (pasta/slirp4netns) ends
+          # up in a cgroup the runner user cannot signal — causing "kill network
+          # process: permission denied" during container cleanup. With cgroupfs,
+          # podman owns its cgroup subtree directly and kill() succeeds.
+          mkdir -p ~/.config/containers
+          printf '[engine]\ncgroup_manager = "cgroupfs"\n' \
+            > ~/.config/containers/containers.conf
           podman --version
           podman info | grep -iE 'cgroup' || true
 
