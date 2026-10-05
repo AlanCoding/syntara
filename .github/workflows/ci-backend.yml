@@ -505,14 +505,48 @@ jobs:
       # Pre-pull the script node image onto the kind node up front. The node pod uses
       # imagePullPolicy: IfNotPresent, so with the image already present it starts
       # immediately instead of racing a cold registry pull against the test's result
-      # wait while the full integration suite saturates the runner. The node's
-      # containerd pulls the public image directly (crictl into the k8s.io namespace
-      # kubelet checks); `kind load` is avoided because exporting a multi-arch image
-      # from the docker daemon fails with "content digest not found".
+      # wait while the full integration suite saturates the runner. We prime the pull
+      # with a throwaway pod rather than execing into the node container: that keeps
+      # the step independent of the host container engine (no docker/podman call) —
+      # the kubelet pulls the public image onto the single kind node where the real
+      # node pods also run. We wait on the container's imageID (populated once
+      # containerd has the image) instead of pod readiness, so it does not matter
+      # whether the image ships a shell or the bare container stays up afterwards.
       - name: Pre-pull the script node image into kind
         run: |
-          docker exec integration-test-control-plane \
-            crictl pull quay.io/ahetheri/syntara-node-script:migration-test
+          set -euo pipefail
+          image="quay.io/ahetheri/syntara-node-script:migration-test"
+          kubectl run ep-image-prepull \
+            --namespace execution-plane \
+            --image="$image" \
+            --image-pull-policy=IfNotPresent \
+            --restart=Never
+          pulled=false
+          for _ in $(seq 1 90); do
+            image_id="$(kubectl get pod ep-image-prepull -n execution-plane \
+              -o jsonpath='{.status.containerStatuses[0].imageID}' 2>/dev/null || true)"
+            if [ -n "$image_id" ]; then
+              echo "Image present on node: $image_id"
+              pulled=true
+              break
+            fi
+            reason="$(kubectl get pod ep-image-prepull -n execution-plane \
+              -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)"
+            if [ "$reason" = "ImagePullBackOff" ]; then
+              echo "::error::kubelet could not pull ${image} onto the kind node"
+              kubectl describe pod ep-image-prepull -n execution-plane || true
+              break
+            fi
+            phase="$(kubectl get pod ep-image-prepull -n execution-plane \
+              -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+            echo "waiting for node image pull (phase=${phase:-unknown} reason=${reason:-none})..."
+            sleep 5
+          done
+          kubectl delete pod ep-image-prepull -n execution-plane --ignore-not-found --wait=false
+          if [ "$pulled" != "true" ]; then
+            echo "::error::Script node image was not pulled onto the kind node in time"
+            exit 1
+          fi
 
       - name: Export cluster coordinates for the test suite
         run: |
