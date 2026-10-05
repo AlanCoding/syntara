@@ -583,6 +583,22 @@ jobs:
           retention-days: 30
           include-hidden-files: true
 
+      # Pre-delete the kind cluster before kind-action's post-job hook tries to.
+      # The rootless network helper (pasta/slirp4netns) for the kind node ends up
+      # in a cgroup the runner user cannot signal, so podman's cleanup gets
+      # "kill network process: permission denied" (EPERM). If we kill the helper
+      # with sudo first, podman's kill() gets ESRCH ("already gone") instead of
+      # EPERM, which podman treats as success, and the cluster deletion completes.
+      # kind-action's post-job hook then finds no cluster and exits cleanly.
+      - name: Pre-delete kind cluster (workaround rootless netns kill permission)
+        if: always()
+        env:
+          KIND_EXPERIMENTAL_PROVIDER: podman
+        run: |
+          sudo pkill -x pasta 2>/dev/null || sudo pkill -x slirp4netns 2>/dev/null || true
+          sleep 1
+          kind delete cluster --name integration-test 2>/dev/null || true
+
   test-compose-e2e:
     name: (Backend) Test Podman Compose E2E
     needs: changes
