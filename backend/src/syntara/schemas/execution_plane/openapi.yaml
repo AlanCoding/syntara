@@ -238,43 +238,6 @@ components:
         - created_at
       title: ExecutionTargetFacadeRead
       description: Safe target fields available to AO's authorized management API.
-    KubernetesPlacement:
-      properties:
-        type:
-          type: string
-          const: kubernetes
-          title: Type
-        namespace:
-          type: string
-          maxLength: 63
-          minLength: 1
-          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-          title: Namespace
-        node_selectors:
-          items:
-            type: string
-          type: array
-          title: Node Selectors
-        tolerations:
-          items:
-            type: string
-          type: array
-          title: Tolerations
-      type: object
-      required:
-        - type
-        - namespace
-      title: KubernetesPlacement
-    RHELPlacement:
-      properties:
-        type:
-          type: string
-          const: rhel
-          title: Type
-      type: object
-      required:
-        - type
-      title: RHELPlacement
     ExecutionTargetListResponse:
       properties:
         resources:
@@ -311,6 +274,45 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    KubernetesPlacement:
+      properties:
+        type:
+          type: string
+          const: kubernetes
+          title: Type
+        namespace:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+          title: Namespace
+        node_selectors:
+          items:
+            type: string
+          type: array
+          title: Node Selectors
+        tolerations:
+          items:
+            type: string
+          type: array
+          title: Tolerations
+      type: object
+      required:
+        - type
+        - namespace
+      title: KubernetesPlacement
+      description: Kubernetes scheduling metadata returned by the Execution Plane.
+    RHELPlacement:
+      properties:
+        type:
+          type: string
+          const: rhel
+          title: Type
+      type: object
+      required:
+        - type
+      title: RHELPlacement
+      description: RHEL placement marker returned by the Execution Plane.
     ValidationError:
       properties:
         loc:

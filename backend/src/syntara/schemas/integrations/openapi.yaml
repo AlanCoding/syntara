@@ -1044,7 +1044,7 @@ components:
 
     ExecutionPlaneSyncStatus:
       type: string
-      description: Synchronization state of an OpenShift integration in the independent Execution Plane service.
+      description: Observed state of the independent EP resource for an integration.
       enum:
         - pending
         - ready
@@ -1397,8 +1397,6 @@ components:
               anyOf:
                 - $ref: '#/components/schemas/ExecutionPlaneSyncStatus'
                 - type: "null"
-              title: Execution Plane Status
-              description: Observed synchronization state for OpenShift integrations
             execution_plane_revision:
               type: integer
               title: Execution Plane Revision
@@ -1408,7 +1406,6 @@ components:
                 - type: string
                 - type: "null"
               title: Execution Plane Error
-              description: Safe diagnostic for the latest failed Execution Plane synchronization
             scope:
               $ref: '#/components/schemas/IntegrationScope'
               default: global
