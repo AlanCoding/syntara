@@ -72,7 +72,6 @@ dependencies = [
     "uuid-utils>=0.9.0",
     "pypdf>=6.15.0",
     "nh3>=0.2.21",
-    "execution-plane",
 ]
 
 [project.optional-dependencies]
@@ -99,7 +98,6 @@ dev = [
     "types-python-dateutil>=2.8.0",  # type stubs for python-dateutil
     "psutil>=5.9.0",  # for memory monitoring in performance tests
     "scikit-learn-stubs>=0.0.3",  # type stubs for scikit-learn
-    "grpc-stubs>=1.53.0.6",  # type stubs for grpc (vendored node_protocol client)
     "openapi-python-client>=0.28.3,<0.29.0",  # for API client code generation. 0.29+ requires typer<0.27, conflicts with our typer>=0.27.0
     "moto[s3]>=5.0.0",  # for S3 mock testing
     "boto3-stubs[s3]>=1.35.0",  # type stubs for boto3 S3
@@ -139,7 +137,6 @@ constraint-dependencies = [
 syntara-api-client = { path = "src/api_client", editable = true }
 orchestrator-cli = { path = "src/cli", editable = true }
 orchestrator-test-sdk = { path = "test-sdk", editable = true }
-execution-plane = { path = "execution-plane", editable = true }
 
 [project.scripts]
 orchestrator-admin = "syntara.orchestrator_admin:app"
@@ -165,8 +162,6 @@ only-include = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
-# Generated protobuf/gRPC stubs (vendored node_protocol) are machine-authored; do not lint.
-extend-exclude = ["*_pb2.py", "*_pb2.pyi", "*_pb2_grpc.py", "*_pb2_grpc.pyi"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -207,14 +202,6 @@ ignore = [
     "PGH003",   # Allow generic type: ignore comments in tests
     "SIM117",   # Allow nested with statements (required for SonarQube S5707 — pytest.raises in own block)
 ]
-"execution-plane/tests/**/*.py" = ["INP001"]  # Keep this separate test tree out of the tests package namespace
-"execution-plane/src/execution_plane/migrations/**/*.py" = ["INP001", "D400", "D415", "PLR0915"]
-"execution-plane/tools/dev_cli.py" = ["EM101", "EM102", "FBT001", "INP001", "T201", "TRY003", "TRY301"]
-"execution-plane/tools/ao_registration.py" = ["EM101", "INP001", "TC003", "TRY003", "D413"]
-"execution-plane/tools/register_kind_sa_target.py" = ["EM101", "INP001", "T201", "TRY003", "TC003"]
-"execution-plane/tools/test_dev_cli.py" = ["D102", "D103", "D101", "D107", "INP001", "S101"]
-"execution-plane/tools/test_ao_registration.py" = ["D102", "D103", "D101", "D107", "INP001", "S101"]
-"execution-plane/tools/test_register_kind_sa_target.py" = ["D102", "D103", "D101", "D107", "INP001", "S101"]
 "tests/performance/conftest.py" = ["E402"]  # pytest_plugins must precede imports
 "src/syntara/api/repositories/*.py" = ["ANN401"]  # Allow Any for database row types
 "src/syntara/core/database/migrations/**/*.py" = ["INP001", "D400", "D415", "PLR0915"]  # Alembic files (auto-generated)
@@ -230,10 +217,10 @@ ignore = [
 # Mypy (strict) continues to run in CI via a dedicated GitHub Actions job.
 [tool.pyrefly]
 python-version = "3.12.0"
-project-includes = ["src", "execution-plane/src", "execution-plane/tools"]
+project-includes = ["src"]
 # Editable installs are otherwise inferred as third-party directories and skipped.
 disable-project-excludes-heuristics = true
-project-excludes = ["**/__pycache__", "**/node_modules", ".venv/**", "src/api_client", "src/cli", "test-sdk/src", "execution-plane/tools/dev_cli.py", "execution-plane/tools/ao_registration.py", "execution-plane/tools/register_kind_sa_target.py", "execution-plane/tools/test_dev_cli.py", "execution-plane/tools/test_ao_registration.py", "execution-plane/tools/test_register_kind_sa_target.py"]
+project-excludes = ["**/__pycache__", "**/node_modules", ".venv/**", "src/api_client", "src/cli", "test-sdk/src"]
 
 # SQLModel/SQLAlchemy stubs cause false positives for these rules.
 # unbound-name and bad-return have a few false positives in existing code
@@ -251,8 +238,6 @@ bad-return = "warn"
 # MyPy configuration
 [tool.mypy]
 python_version = "3.12"
-# Generated protobuf/gRPC stubs (vendored node_protocol) are machine-authored; do not type-check.
-exclude = ['.*_pb2\.pyi?$', '.*_pb2_grpc\.pyi?$']
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -311,7 +296,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-ra -q --strict-markers --strict-config"
-testpaths = ["tests", "execution-plane/tests", "execution-plane/tools"]
+testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -333,7 +318,7 @@ markers = [
 
 # Coverage configuration
 [tool.coverage.run]
-source = ["src", "execution-plane/src", "execution-plane/tools"]
+source = ["src"]
 relative_files = true
 concurrency = ["greenlet", "thread"]
 omit = [
@@ -343,7 +328,6 @@ omit = [
     "tools/*",  # Manual utilities, not production code
     "src/api_client/*",  # Auto-generated API client, not production code
     "src/cli/*",  # CLI package, tested separately
-    "execution-plane/src/execution_plane/migrations/**",  # Alembic migrations
     "src/syntara/core/database/migrations/**",  # Alembic migrations, not unit-testable
     "src/syntara/workflows/worker.py",  # Entrypoint scripts, not unit-testable
     "src/syntara/workflows/background_worker.py",
@@ -367,7 +351,7 @@ exclude_lines = [
 
 [tool.vulture]
 min_confidence = 100
-paths = ["src/syntara", "execution-plane/src/execution_plane"]
+paths = ["src/syntara"]
 exclude = ["*tests*", "*test_*", "*alembic*", "*migrations*", "*__pycache__*"]
 ignore_decorators = [
     "@app.*",

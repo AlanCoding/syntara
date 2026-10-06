@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Orchestrator API",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "A distributed multi-agent workflow orchestration system"
   },
   "servers": [
@@ -44248,6 +44248,17 @@
         "title": "IntegrationScope",
         "description": "Visibility scope of an integration."
       },
+      "ExecutionPlaneSyncStatus": {
+        "type": "string",
+        "description": "Observed state of the independent EP resource for an integration.",
+        "enum": [
+          "pending",
+          "ready",
+          "error",
+          "deleting"
+        ],
+        "title": "ExecutionPlaneSyncStatus"
+      },
       "IntegrationProjectAssignmentRead": {
         "type": "object",
         "title": "IntegrationProjectAssignmentRead",
@@ -44913,6 +44924,32 @@
           "validation_status": {
             "$ref": "#/components/schemas/IntegrationStatus",
             "default": "unknown"
+          },
+          "execution_plane_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionPlaneSyncStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution_plane_revision": {
+            "type": "integer",
+            "title": "Execution Plane Revision",
+            "default": 0
+          },
+          "execution_plane_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Plane Error"
           },
           "scope": {
             "$ref": "#/components/schemas/IntegrationScope",

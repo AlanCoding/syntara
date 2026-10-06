@@ -1509,20 +1509,17 @@ class WorkflowEngineSettings(BaseSettings):
     # types (e.g. "script"); values are fully-qualified image refs the target
     # cluster can pull.
     #
-    # TEMPORARY: these default to the public pre-release node images Aaron
-    # published on quay.io so the cold-start path (and the kind demo) works out
-    # of the box without a local build + `kind load`. The `migration-test` tag is
-    # mutable; once the node-image publishing pipeline lands, replace these with
-    # immutable digest pins and move ownership off a personal namespace. Today
-    # only "script" is actually EP-dispatched (see ep_dispatch_activity); the
-    # other node types still run in-process, so their entries are staged for the
-    # upcoming migration and currently unused.
+    # Only the script node is sent to EP in the first isolated release. Pin the
+    # node image by digest so Temporal retries cannot select changed code. The
+    # image is public but remains in a maintainer namespace until the publishing
+    # pipeline moves it to the organization; track that migration in the revisit
+    # decisions document.
     node_container_images: dict[str, str] = Field(
         default_factory=lambda: {
-            "script": "quay.io/ahetheri/syntara-node-script:migration-test",
-            "http_request": "quay.io/ahetheri/http-executor:migration-test",
-            "aap_job_template": "quay.io/ahetheri/syntara-node-aap-job:migration-test",
-            "aap_workflow_job_template": "quay.io/ahetheri/syntara-node-aap-workflow:migration-test",
+            "script": (
+                "quay.io/ahetheri/syntara-node-script@sha256:"
+                "68bf485c8ee6ce986413fa3a6a91e384a2f98222f6b9b9734da79299f0b2bda0"
+            ),
         },
         description="Node type to container image reference for Execution Plane dispatch",
     )
@@ -1828,6 +1825,22 @@ class WorkflowClientSettings(BaseSettings):
         default=30.0,
         description="Per-attempt timeout to prevent unbounded wait times (applies to initial + all retries)",
         gt=0,
+    )
+
+    ep_api_url: str | None = Field(
+        default=None,
+        description="Base URL for the independently deployed Execution Plane API.",
+    )
+
+    ep_request_timeout_seconds: float = Field(
+        default=10.0,
+        description="Per-request timeout for AO to EP HTTP operations.",
+        gt=0,
+    )
+
+    ep_callback_service_cn: str = Field(
+        default="execution-plane.ao.svc",
+        description="mTLS service identity permitted to deliver EP completion events.",
     )
 
     @model_validator(mode="after")

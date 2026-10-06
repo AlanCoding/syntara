@@ -1,124 +1,91 @@
-# Execution Plane: Current Integration and Future Service Boundary
+# Syntara and Execution Plane integration
 
-## What this document is
+AO owns user authentication, authorization, the public API, Temporal workflow
+dispatch, and integration records. EP is a separately deployed service that
+owns accepted work, cluster and target state, execution attempts, result
+persistence, and completion delivery. AO calls EP through its authenticated
+versioned HTTP API. AO does not import EP persistence code, connect to the EP
+database, or run EP workers in its Temporal processes.
 
-A record of the deliberate shortcuts taken to ship the Execution Plane (EP)
-worker without introducing a new HTTP service, and an explicit map of what
-those shortcuts will become when the EP becomes standalone.
+For the first deployment, AO and EP may use the existing PostgreSQL server, but
+EP uses a distinct database with EP-owned runtime and migration roles. Neither
+service's runtime role can connect to the other service database.
 
-Every place in the codebase where Syntara directly touches the
-`execution_plane` database schema carries a reference to this document. That
-comment is a breadcrumb: if you are reading it, you have found a boundary
-crossing that must be replaced before EP can run as an independent service.
+## Work and completion
 
----
+AO validates a script node, selects its digest-pinned image, persists an
+encrypted request binding with the Temporal task token, and submits a versioned
+invocation to EP over HTTP. It retries a lost or unavailable submission with
+the same request ID and frozen payload. EP's API stores the request in its own
+database; EP's worker dispatches it independently.
 
-## Architecture diagrams
+The cold-start EP backend allocates a one-attempt Kubernetes Job and talks to
+the SDK node runtime only over gRPC, tunneled through the authenticated
+Kubernetes API port-forward. The gRPC protocol carries invocation data,
+progress, errors, stdout/stderr fields, and final output. EP does not create a
+workload input Secret, read Pod logs, use `exec`, or connect directly to
+Temporal. The Job/Pod lifecycle is an implementation detail of this cold-start
+backend; a future worker manager can attach to an existing worker without
+changing WorkItem semantics.
 
-### Current boundary crossings (intentional shortcuts)
+EP commits results to a durable outbox and delivers them to AO by authenticated
+callback. AO deduplicates callbacks in its inbox and bridges the result to the
+original Temporal activity. If a callback is missing, AO can reconcile a
+terminal EP result through the status API. An uncertain gRPC outcome becomes
+`reconciliation_required`: EP does not rerun that attempt, emits the state to
+AO, and AO fails the activity with `WorkloadOutcomeUnknownError` while
+preserving EP's WorkItem for operator investigation.
 
-Each is a deliberate shortcut that avoids inter-service complexity (service discovery, auth, TLS, retry logic) at the cost of tight coupling. Each must be replaced when EP becomes standalone.
+AO cancellation is persisted and delivered to EP by stable request ID. EP
+forwards cooperative cancellation over gRPC and only reports confirmed
+cancellation after the cold-start worker has stopped. A result received during
+the cancellation race wins.
 
-| # | What it does |
-|---|---|
-| 1 | EP's web router ([`router.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/execution-plane/src/execution_plane/router.py)) — temporarily served by Syntara's web server ([`main.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/src/syntara/api/main.py)); imports `SyntaraRouter`, `PermissionChecker`, and `get_db` from syntara; reads `execution_plane.*` tables |
-| 2 | [`ep_dispatch_activity.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/src/syntara/workflows/workflow_engine/activities/ep/ep_dispatch_activity.py) — Selects the node image, builds the invocation envelope, writes the `WorkItem` row (envelope in `payload`), issues `pg_notify`, stores Temporal task token for EP worker's gRPC callback. The plaintext envelope in `payload` is an MVP shortcut — see [cold-start-node-dispatch.md](cold-start-node-dispatch.md) (secrets at rest) |
-| 3 | [`worker.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/execution-plane/src/execution_plane/worker.py) — EP worker calls `handle.complete()` — a gRPC call directly into Syntara's Temporal; requires network access to Temporal :7233 |
-| 4 | [`integration_service.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/src/syntara/integrations/services/integration_service.py) — Syntara calls `ClusterSyncService` (via `ClusterRegistry`) when Integration (type=openshift) is created/updated/deleted; never reads `execution_plane.clusters` directly |
+## Integration configuration
 
----
+AO remains the source of integration configuration. Its durable outbox sends
+revisioned desired state to EP over the API. EP reports observed status and
+revision; AO presents `pending`, `ready`, or a safe error while the services
+converge. The two databases do not participate in a cross-service transaction.
+Cluster-management credentials are encrypted in EP's database. Workload
+credential mounts remain out of scope until ANSTRAT-2422 establishes the
+extension contract.
 
-> [!CAUTION]
-> Do not add Syntara code that **reads** from or **joins** `execution_plane` schema tables.
-> Do not add new `execution_plane` schema writes from Syntara without updating this document.
+## Combined-service smoke evidence
 
-### Current state
+On 6 October 2026, the current AO and EP migration branches were run together
+against separate AO and EP databases on one PostgreSQL server and a local Kind
+cluster. The enabled script-node workflow completed through the AO API, EP API,
+EP worker, Kubernetes Job, SDK gRPC transport, durable EP completion event,
+authenticated AO callback, and Temporal activity. The persisted EP result had
+`stdout = "gate test\n"`, an empty `stderr`, exit code `0`, and completed
+resource cleanup. The EP callback received AO's `202 Accepted` response. The
+focused PostgreSQL persistence tests and EP unit suite also passed.
 
-The EP router is temporarily mounted inside the Syntara web server. Work is
-submitted by writing directly to the shared database rather than calling an API.
+The smoke test found and fixed two integration blockers: the dispatcher Role
+needed `get` on `pods/portforward` (the API-server connect request is GET), and
+HTTPX skipped loading EP's client certificate when its CA was configured as a
+string path. EP now builds an SSL context with the CA and client certificate
+loaded together. The Role's narrow permission set was checked: port-forward
+access succeeds, while Pod logs and exec remain denied.
 
-```mermaid
-flowchart TD
-    C([Client])
-    DB[("Shared PostgreSQL\n(syntara + execution_plane schemas)")]
+A separate [HTTP executor smoke run](https://github.com/syntara-orchestration/syntara-execution-plane/blob/migration/ANSTRAT-1803/docs/kind-demo-runbook.md#http-executor-smoke-test)
+submitted the SDK HTTP executor image directly to EP and verified a successful
+HTTP response over the Job/gRPC path and completed cleanup. It used the current
+first-release WorkItem contract and did not run AO's native `http_request`
+activity or the AO-to-EP callback path.
 
-    subgraph syn["Syntara"]
-        SW["Web Server"]
-        STW["Temporal Worker"]
-        T["Temporal :7233"]
-    end
+This is evidence for the happy path, not full release qualification. The local
+Kind cluster uses kindnet, which does not enforce NetworkPolicies. A separate
+Calico Kind attempt could not start because its containerd exhausted available
+inotify watchers, and the current OpenShift login was unauthorized. Therefore
+actual allowed-versus-blocked network traffic remains unverified and must be
+tested on an enforcing CNI, preferably the target OpenShift environment. The
+callback outage/restart, cancellation, startup failure, ambiguous Execute,
+database-role isolation, and migration-upgrade scenarios in the EP
+[Kind demo runbook](https://github.com/syntara-orchestration/syntara-execution-plane/blob/migration/ANSTRAT-1803/docs/kind-demo-runbook.md)
+also remain release checks.
 
-    subgraph ep["EP Worker"]
-        EPW["Worker Process"]
-    end
-
-    C -->|"GET /api/v1/workflows/"| SW
-    C -->|"GET /api/execution_plane/v1/execution_targets"| SW
-    SW -->|"SELECT execution_plane.execution_targets\nboundary (1)"| DB
-
-    SW -->|"schedule script activity"| STW
-    STW -->|"INSERT work_items\n+ pg_notify\nboundary (2)"| DB
-    STW -.->|"raise_complete_async\n(activity suspends)"| T
-
-    DB -->|"LISTEN wakes worker;\nSELECT FOR UPDATE"| EPW
-    EPW -->|"gRPC handle.complete()\nboundary (3)"| T
-    T -->|"activity resumed"| STW
-```
-
----
-
-### Future state: EP as an independent service
-
-This diagram is **[speculative]**, the exact
-mechanism for routing and auth is still open. Although this shows a reverse-proxy,
-`/api/execution-plane/` is a temporary path and may move to a different path or host when EP becomes a standalone service.
-
-```mermaid
-flowchart TD
-    C([Client])
-    SDB[("Syntara PostgreSQL")]
-    EPDB[("EP PostgreSQL")]
-
-    subgraph syn["Syntara"]
-        SW["Web Server"]
-        STW["Temporal Worker"]
-        T["Temporal :7233"]
-    end
-
-    subgraph epservice["EP Service (future standalone)"]
-        EPWS["EP Web Server"]
-        EPW["EP Worker"]
-    end
-
-    C -->|"GET /api/v1/workflows/"| SW
-    C -->|"GET /api/execution_plane/v1/execution_targets"| SW
-
-    SW -->|"SELECT syntara.workflows"| SDB
-    SW -. "reverse-proxy\nGET /api/execution_plane/v1/...\nboundar (1)" .-> EPWS
-
-    STW -->|"POST /submit\nboundary (2)"| EPWS
-    EPWS -->|"INSERT work_items"| EPDB
-    EPWS -->|"SELECT execution_plane.execution_targets"| EPDB
-    STW -.->|"raise_complete_async\n(activity suspends)"| T
-
-    EPWS -->|"internal wakeup"| EPW
-
-    EPW -->|"POST /result-callback\nboundary (3)"| SW
-    SW -->|"gRPC handle.complete()"| T
-    T -->|"activity resumed"| STW
-```
-
-Status of the system boundaries in this hypothetical state:
-
-| Current | Future |
-|---|---|
-| Boundary (1): EP router mounted in Syntara web server | Syntara reverse-proxies `/api/execution_plane/v1/...` to the EP web server [speculative]; auth remains Syntara's responsibility, so EP does not import Syntara's auth dependencies |
-| Boundary (2): `INSERT work_items` + `pg_notify` | `POST /submit` — Syntara hands work to the EP web server; EP manages its own DB writes and worker wakeup internally |
-| Boundary (3): gRPC `handle.complete()` direct to Temporal | EP no longer calls Temporal directly; EP worker `POST`s the result to a Syntara callback endpoint and Syntara calls `handle.complete()` |
-| Boundary (4): Syntara calls `ClusterRegistry.register()` for cluster creation on Integration CRUD | `POST /ep-api/v1/clusters/`, `PATCH /ep-api/v1/clusters/{id}`, `DELETE /ep-api/v1/clusters/{id}` — Syntara calls EP API instead of calling internal registry methods directly |
-
----
-
-## API Key Security for Cluster Synchronization
-
-When Syntara creates a cluster via `ClusterSyncService`, the API key is extracted from the resolved credential (decrypted via `SecretService`) and passed to `ClusterRegistry.register()`. The credential's full decrypted dict is never logged; only non-sensitive fields like endpoint and integration ID are logged. All exceptions during credential resolution or cluster sync are caught and logged without the api_key value.
+The merged monorepo Kind/Konflux harnesses that run Alembic from AO, write EP
+tables directly, or connect EP to Temporal are not retained as validation for
+this service boundary.

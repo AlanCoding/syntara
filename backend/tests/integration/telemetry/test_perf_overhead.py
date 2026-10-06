@@ -9,20 +9,15 @@ exercises the full SDK code path (serialization, batching, queuing)
 without mocking, while ensuring the consumer threads never block on
 TCP timeouts so ``shutdown()`` returns promptly.
 
-Each iteration runs a representative bash subprocess workload directly,
-including subprocess creation and output handling. This measures telemetry
-overhead against real subprocess work without requiring a Temporal activity
-context or the Execution Plane dispatch path. (Script nodes now execute in a
-cold-start node container over gRPC; see
-docs/execution-plane/cold-start-node-dispatch.md.)
+Each iteration uses a test-only HTTP-contract double that runs a local script
+subprocess. This measures telemetry overhead against equivalent script work
+without importing the separately deployed Execution Plane implementation.
 
 Run with: make test-integration-coverage
 """
 
-import asyncio
 import os
 import statistics
-import subprocess
 import time
 import uuid
 
@@ -42,6 +37,7 @@ from syntara.workflows.workflow_engine.models.workflow_definition import (
     NodeType,
     WorkflowTerminalStatus,
 )
+from tests.fixtures.fake_execution_plane import execute_fixture_script
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -66,22 +62,21 @@ _ACTIVITY_DEFS: list[dict[str, object]] = [
     for i in range(_ACTIVITIES_PER_WORKFLOW)
 ]
 
-# Representative lightweight workload for the overhead baseline.
+# Script config passed to the execution-plane executor.
 # The script performs a SHA-256 hash computation to simulate a lightweight
 # but realistic workload.  Real activities (API calls, AAP job templates)
 # take 100 ms to minutes; this is intentionally fast to stress the overhead
 # measurement while remaining representative of actual subprocess work.
-# Script execution itself now happens in a cold-start node container over gRPC
-# (see docs/execution-plane/cold-start-node-dispatch.md); this test only needs a
-# comparable subprocess workload to measure telemetry overhead against, so it
-# runs the bash directly rather than through the Execution Plane dispatch path.
-_SCRIPT_CODE = 'for i in $(seq 1 5); do echo "payload-$i" | sha256sum > /dev/null; done'
+_SCRIPT_CONFIG: dict[str, str] = {
+    "language": "bash",
+    "code": 'for i in $(seq 1 5); do echo "payload-$i" | sha256sum > /dev/null; done',
+}
 
 
 async def _run_workflow_activities() -> None:
     """Execute real bash script activities like a workflow would."""
     for _ in range(_ACTIVITIES_PER_WORKFLOW):
-        await asyncio.to_thread(subprocess.run, ["/bin/bash", "-c", _SCRIPT_CODE], check=True, capture_output=True)
+        await execute_fixture_script({"input_config": _SCRIPT_CONFIG, "output_config": None})
 
 
 async def _run_baseline(iterations: int) -> list[float]:

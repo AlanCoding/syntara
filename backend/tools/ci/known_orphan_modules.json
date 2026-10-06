@@ -1,11 +1,6 @@
 {
   "description": "Glob patterns for modules intentionally not imported via standard import statements. Each pattern documents the discovery/registration mechanism that makes the module reachable at runtime. See docs/standards/static-analysis.md.",
   "patterns": {
-    "execution_plane/worker.py": "Worker entrypoint invoked via execution-plane-worker or python -m",
-    "execution_plane/node_protocol/node_pb2.py": "Generated protobuf module (vendored) — imported via `from execution_plane.node_protocol import node_pb2 as pb` in codec.py and client.py; pyan3 does not trace `from package import submodule` edges",
-    "execution_plane/node_protocol/node_pb2_grpc.py": "Generated gRPC stubs (vendored) — imported via `from execution_plane.node_protocol import node_pb2_grpc as rpc` in client.py; pyan3 does not trace `from package import submodule` edges",
-    "execution_plane/migrations/env.py": "Alembic migration environment invoked by the Alembic CLI",
-    "execution_plane/migrations/versions/*.py": "Alembic migration revisions loaded by Alembic",
     "syntara/*/router.py": "Auto-discovered by core.router_discovery.discover_and_register_routers() at app startup",
     "syntara/*/*_router.py": "Auto-discovered by core.router_discovery (matches *_router.py naming convention)",
     "syntara/*/__main__.py": "CLI entrypoint invoked via python -m (e.g., python -m syntara.seed)",
