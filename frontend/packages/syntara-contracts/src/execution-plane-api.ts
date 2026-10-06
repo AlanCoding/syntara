@@ -157,28 +157,6 @@ export interface components {
       /** Last Ran At */
       last_ran_at?: string | null
     }
-    /** KubernetesPlacement */
-    KubernetesPlacement: {
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      type: 'kubernetes'
-      /** Namespace */
-      namespace: string
-      /** Node Selectors */
-      node_selectors?: string[]
-      /** Tolerations */
-      tolerations?: string[]
-    }
-    /** RHELPlacement */
-    RHELPlacement: {
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      type: 'rhel'
-    }
     /**
      * ExecutionTargetListResponse
      * @description Paginated list response for ExecutionTarget.
@@ -197,6 +175,34 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components['schemas']['ValidationError'][]
+    }
+    /**
+     * KubernetesPlacement
+     * @description Kubernetes scheduling metadata returned by the Execution Plane.
+     */
+    KubernetesPlacement: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'kubernetes'
+      /** Namespace */
+      namespace: string
+      /** Node Selectors */
+      node_selectors?: string[]
+      /** Tolerations */
+      tolerations?: string[]
+    }
+    /**
+     * RHELPlacement
+     * @description RHEL placement marker returned by the Execution Plane.
+     */
+    RHELPlacement: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'rhel'
     }
     /** ValidationError */
     ValidationError: {
