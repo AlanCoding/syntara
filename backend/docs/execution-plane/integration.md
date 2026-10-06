@@ -69,6 +69,12 @@ string path. EP now builds an SSL context with the CA and client certificate
 loaded together. The Role's narrow permission set was checked: port-forward
 access succeeds, while Pod logs and exec remain denied.
 
+A separate [HTTP executor smoke run](https://github.com/syntara-orchestration/syntara-execution-plane/blob/migration/ANSTRAT-1803/docs/kind-demo-runbook.md#http-executor-smoke-test)
+submitted the SDK HTTP executor image directly to EP and verified a successful
+HTTP response over the Job/gRPC path and completed cleanup. It used the current
+first-release WorkItem contract and did not run AO's native `http_request`
+activity or the AO-to-EP callback path.
+
 This is evidence for the happy path, not full release qualification. The local
 Kind cluster uses kindnet, which does not enforce NetworkPolicies. A separate
 Calico Kind attempt could not start because its containerd exhausted available
