@@ -8,6 +8,7 @@ from uuid import UUID
 from attrs import define as _attrs_define
 from dateutil.parser import isoparse
 
+from ..models.execution_plane_sync_status import ExecutionPlaneSyncStatus
 from ..models.integration_refresh_status import IntegrationRefreshStatus
 from ..models.integration_scope import IntegrationScope
 from ..models.integration_status import IntegrationStatus
@@ -46,6 +47,9 @@ class IntegrationRead:
         updated_by (None | Unset | UserReference): User who last modified the integration
         enabled (bool | Unset):  Default: True.
         validation_status (IntegrationStatus | Unset): Validation status of an integration.
+        execution_plane_status (ExecutionPlaneSyncStatus | None | Unset):
+        execution_plane_revision (int | Unset):  Default: 0.
+        execution_plane_error (None | str | Unset):
         scope (IntegrationScope | Unset): Visibility scope of an integration.
         last_validated_at (datetime.datetime | None | Unset):
         management_credential_id (None | Unset | UUID):
@@ -73,6 +77,9 @@ class IntegrationRead:
     updated_by: None | Unset | UserReference = UNSET
     enabled: bool | Unset = True
     validation_status: IntegrationStatus | Unset = UNSET
+    execution_plane_status: ExecutionPlaneSyncStatus | None | Unset = UNSET
+    execution_plane_revision: int | Unset = 0
+    execution_plane_error: None | str | Unset = UNSET
     scope: IntegrationScope | Unset = UNSET
     last_validated_at: datetime.datetime | None | Unset = UNSET
     management_credential_id: None | Unset | UUID = UNSET
@@ -150,6 +157,22 @@ class IntegrationRead:
         validation_status: str | Unset = UNSET
         if not isinstance(self.validation_status, Unset):
             validation_status = self.validation_status.value
+
+        execution_plane_status: None | str | Unset
+        if isinstance(self.execution_plane_status, Unset):
+            execution_plane_status = UNSET
+        elif isinstance(self.execution_plane_status, ExecutionPlaneSyncStatus):
+            execution_plane_status = self.execution_plane_status.value
+        else:
+            execution_plane_status = self.execution_plane_status
+
+        execution_plane_revision = self.execution_plane_revision
+
+        execution_plane_error: None | str | Unset
+        if isinstance(self.execution_plane_error, Unset):
+            execution_plane_error = UNSET
+        else:
+            execution_plane_error = self.execution_plane_error
 
         scope: str | Unset = UNSET
         if not isinstance(self.scope, Unset):
@@ -249,6 +272,12 @@ class IntegrationRead:
             field_dict["enabled"] = enabled
         if validation_status is not UNSET:
             field_dict["validation_status"] = validation_status
+        if execution_plane_status is not UNSET:
+            field_dict["execution_plane_status"] = execution_plane_status
+        if execution_plane_revision is not UNSET:
+            field_dict["execution_plane_revision"] = execution_plane_revision
+        if execution_plane_error is not UNSET:
+            field_dict["execution_plane_error"] = execution_plane_error
         if scope is not UNSET:
             field_dict["scope"] = scope
         if last_validated_at is not UNSET:
@@ -407,6 +436,34 @@ class IntegrationRead:
         else:
             validation_status = IntegrationStatus(_validation_status)
 
+        def _parse_execution_plane_status(data: object) -> ExecutionPlaneSyncStatus | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                execution_plane_status_type_0 = ExecutionPlaneSyncStatus(data)
+
+                return execution_plane_status_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ExecutionPlaneSyncStatus | None | Unset, data)
+
+        execution_plane_status = _parse_execution_plane_status(d.pop("execution_plane_status", UNSET))
+
+        execution_plane_revision = d.pop("execution_plane_revision", UNSET)
+
+        def _parse_execution_plane_error(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        execution_plane_error = _parse_execution_plane_error(d.pop("execution_plane_error", UNSET))
+
         _scope = d.pop("scope", UNSET)
         scope: IntegrationScope | Unset
         if isinstance(_scope, Unset):
@@ -547,6 +604,9 @@ class IntegrationRead:
             updated_by=updated_by,
             enabled=enabled,
             validation_status=validation_status,
+            execution_plane_status=execution_plane_status,
+            execution_plane_revision=execution_plane_revision,
+            execution_plane_error=execution_plane_error,
             scope=scope,
             last_validated_at=last_validated_at,
             management_credential_id=management_credential_id,
