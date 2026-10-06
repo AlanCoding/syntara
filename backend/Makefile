@@ -345,6 +345,7 @@ ep-migrate: check-deps ## Apply execution_plane schema migrations (separate from
 	@$(COMPOSE_FINAL_CMD) up execution-plane-db-init
 	@cd $(EP_REPOSITORY) && \
 		DATABASE_URL="$${EP_DATABASE_MIGRATOR_URL:-$(EP_DATABASE_MIGRATOR_URL)}" \
+		EP_CREDENTIAL_ENCRYPTION_KEY_PATH="$(abspath .secrets/ep-credential-encryption-key)" \
 		uv run alembic upgrade head
 	@echo "✅ execution_plane migrations complete"
 
@@ -367,7 +368,8 @@ ep-worker-run: check-deps _ensure-secrets _ensure-certs ## Run the standalone Ex
 		EP_DATABASE_URL="$${EP_DATABASE_URL:-$(EP_DATABASE_RUNTIME_URL)}" \
 		EP_CREDENTIAL_ENCRYPTION_KEY_PATH="$(abspath .secrets/ep-credential-encryption-key)" \
 		EP_COMPLETION_CALLBACK_URL="$${EP_COMPLETION_CALLBACK_URL:-https://localhost:8000/api/execution_plane/v1/events}" \
-		EP_WORKLOAD_RUNNER_IMAGE="$${EP_WORKLOAD_RUNNER_IMAGE:-}" \
+		EP_NODE_STARTUP_SECONDS="$${EP_NODE_STARTUP_SECONDS:-120}" \
+		EP_NODE_GRACE_SECONDS="$${EP_NODE_GRACE_SECONDS:-30}" \
 		EP_WORKLOAD_ALLOWED_EGRESS_CIDRS="$${EP_WORKLOAD_ALLOWED_EGRESS_CIDRS:-[]}" \
 		EP_WORKLOAD_FORBIDDEN_EGRESS_CIDRS="$${EP_WORKLOAD_FORBIDDEN_EGRESS_CIDRS:-[]}" \
 		EP_CALLBACK_CA_CERT_PATH="$(abspath .secrets/certs/ca.pem)" \

@@ -113,8 +113,8 @@ async def persist_dispatch_binding(
     activity_attempt: int,
     task_token: bytes,
     payload: dict[str, Any],
-) -> None:
-    """Durably store the encrypted Temporal token before making an EP request."""
+) -> dict[str, Any]:
+    """Persist AO's first encrypted request and reuse it on every activity retry."""
     now = datetime.now(UTC)
     encryptor = _encryptor()
     token_ciphertext = encryptor.encrypt_field(
@@ -131,6 +131,7 @@ async def persist_dispatch_binding(
                 )
             ).first()
             if existing is None:
+                frozen_payload = payload
                 session.add(
                     ExecutionPlaneActivityBinding(
                         id=uuid4(),
@@ -158,7 +159,13 @@ async def persist_dispatch_binding(
                     _raise_completion_conflict(CompletionConflictReason.REQUEST_IDENTITY)
                 existing.activity_attempt = activity_attempt
                 existing.task_token_ciphertext = token_ciphertext
-                existing.request_payload_ciphertext = payload_ciphertext
+                frozen_payload = encryptor.decrypt_field(
+                    existing.request_payload_ciphertext,
+                    request_id,
+                    "execution_request",
+                )
+                if not isinstance(frozen_payload, dict):
+                    _raise_completion_conflict(CompletionConflictReason.REQUEST_IDENTITY)
                 existing.status = "submitting"
                 existing.updated_at = now
                 result = await session.exec(
@@ -169,6 +176,7 @@ async def persist_dispatch_binding(
                     event.lease_expires_at = None
                     event.next_attempt_at = now
             await session.commit()
+            return frozen_payload
         except Exception:
             await session.rollback()
             raise
@@ -350,7 +358,7 @@ async def _reconcile_missing_events() -> None:
                     error_type=type(exc).__name__,
                 )
                 continue
-            if state.get("status") not in {"completed", "failed", "cancelled"}:
+            if state.get("status") not in {"completed", "failed", "cancelled", "reconciliation_required"}:
                 continue
             event_id = state.get("completion_event_id")
             state_revision = state.get("state_revision")
@@ -448,7 +456,13 @@ async def _deliver_requested_cancellations() -> None:
                     error_type=type(exc).__name__,
                 )
             else:
-                acknowledged = status_value in {"cancel_requested", "cancelled", "completed", "failed"}
+                acknowledged = status_value in {
+                    "cancel_requested",
+                    "cancelled",
+                    "completed",
+                    "failed",
+                    "reconciliation_required",
+                }
                 await _record_cancellation_attempt(
                     binding_id,
                     delivered=acknowledged,
@@ -586,7 +600,7 @@ async def _deliver_one(client: Client, event: ExecutionPlaneCompletionInbox) -> 
             if event.status == "cancelled":
                 error_message = "Execution Plane work was cancelled before execution"
                 error_type = "ExecutionPlaneWorkCancelled"
-            await handle.fail(ApplicationError(error_message, type=error_type, non_retryable=True))
+            await handle.fail(ApplicationError(error_message, result, type=error_type, non_retryable=True))
     except RPCError as exc:
         await _mark_event_for_reconciliation(
             event.event_id,

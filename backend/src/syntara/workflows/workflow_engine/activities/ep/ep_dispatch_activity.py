@@ -19,7 +19,11 @@ from syntara.execution_plane.client import (
     ExecutionPlaneUnavailableError,
 )
 from syntara.workflows.workflow_engine.activities.common import HEARTBEAT_STOP_MONITOR
-from syntara.workflows.workflow_engine.constants import ENGINE_TIMEOUT_SECONDS_KEY
+from syntara.workflows.workflow_engine.constants import (
+    DEFAULT_MAX_OUTPUT_BYTES,
+    ENGINE_MAX_OUTPUT_BYTES_KEY,
+    ENGINE_TIMEOUT_SECONDS_KEY,
+)
 from syntara.workflows.workflow_engine.models.workflow_definition import (
     ActivityName,
     ScriptExecutorParameters,
@@ -29,6 +33,8 @@ logger = structlog.stdlib.get_logger(__name__)
 
 INITIAL_RETRY_DELAY_SECONDS = 0.5
 MAX_RETRY_DELAY_SECONDS = 10.0
+_NODE_TYPE = "script"
+_DEFAULT_TIMEOUT_SECONDS = 300
 
 
 def _stable_request_id(*, workflow_id: str, run_id: str, activity_id: str, namespace: str) -> str:
@@ -36,7 +42,33 @@ def _stable_request_id(*, workflow_id: str, run_id: str, activity_id: str, names
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
-async def _dispatch_to_ep(
+def _build_invocation(input_config: dict[str, Any], settings: Any, info: Any) -> dict[str, Any]:  # noqa: ANN401
+    """Build the versioned SDK request before AO freezes it for activity retries."""
+    return {
+        "version": 1,
+        "operation": "execute",
+        "inputs": {key: value for key, value in input_config.items() if not key.startswith("_")},
+        "credentials": {"resolved": {}},
+        "workflow_context": {
+            "workflow_id": info.workflow_id,
+            "run_id": info.workflow_run_id,
+            "activity_id": info.activity_id,
+        },
+        "settings": {
+            "workflow_http_request_allowed_hosts": settings.workflow_http_request_allowed_hosts,
+            "aap_poll_interval_seconds": settings.aap_poll_interval_seconds,
+        },
+        "timeout_seconds": int(
+            input_config.get(
+                ENGINE_TIMEOUT_SECONDS_KEY,
+                input_config.get("timeout") or _DEFAULT_TIMEOUT_SECONDS,
+            )
+        ),
+        "max_output_bytes": int(input_config.get(ENGINE_MAX_OUTPUT_BYTES_KEY, DEFAULT_MAX_OUTPUT_BYTES)),
+    }
+
+
+async def _dispatch_to_ep(  # noqa: C901, PLR0915 - service handoff and Temporal retry policy
     input_config: dict[str, Any],
     output_config: dict[str, str] | None,
     project_id: uuid.UUID,
@@ -51,9 +83,17 @@ async def _dispatch_to_ep(
         namespace=settings.temporal_namespace,
     )
     work_correlation_id = uuid.uuid5(uuid.NAMESPACE_URL, request_id)
-    payload = {"input_config": input_config, "output_config": output_config}
+    image = settings.node_container_images.get(_NODE_TYPE)
+    if not image:
+        msg = f"No Execution Plane container image configured for node type '{_NODE_TYPE}'"
+        raise ApplicationError(msg, type="ConfigError", non_retryable=True)
+    payload = {
+        "invocation": _build_invocation(input_config, settings, info),
+        "image": image,
+        "output_config": output_config,
+    }
 
-    await persist_dispatch_binding(
+    payload = await persist_dispatch_binding(
         request_id=request_id,
         project_id=project_id,
         workflow_id=info.workflow_id,
@@ -116,7 +156,7 @@ async def _dispatch_to_ep(
             if state == "cancelled":
                 error_message = "Execution Plane work was cancelled before execution"
                 error_type = "ExecutionPlaneWorkCancelled"
-            raise ApplicationError(error_message, type=error_type, non_retryable=True)
+            raise ApplicationError(error_message, result, type=error_type, non_retryable=True)
         if state not in {
             "pending",
             "claimed",
