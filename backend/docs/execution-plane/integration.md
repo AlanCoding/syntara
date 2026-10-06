@@ -51,11 +51,35 @@ Cluster-management credentials are encrypted in EP's database. Workload
 credential mounts remain out of scope until ANSTRAT-2422 establishes the
 extension contract.
 
-## Validation boundary
+## Combined-service smoke evidence
 
-AO's unit and integration suites use an HTTP-contract fake for EP; they do not
-exercise the standalone EP API, worker, Kubernetes Job, callback network, or
-NetworkPolicy enforcement together. The merged monorepo Kind/Konflux harnesses
-called removed scripts or wrote EP records directly, so they are not retained
-as combined-service evidence. See the EP [Kind demo runbook](https://github.com/syntara-orchestration/syntara-execution-plane/blob/migration/ANSTRAT-1803/docs/kind-demo-runbook.md)
-for the unverified procedure and required release scenarios.
+On 6 October 2026, the current AO and EP migration branches were run together
+against separate AO and EP databases on one PostgreSQL server and a local Kind
+cluster. The enabled script-node workflow completed through the AO API, EP API,
+EP worker, Kubernetes Job, SDK gRPC transport, durable EP completion event,
+authenticated AO callback, and Temporal activity. The persisted EP result had
+`stdout = "gate test\n"`, an empty `stderr`, exit code `0`, and completed
+resource cleanup. The EP callback received AO's `202 Accepted` response. The
+focused PostgreSQL persistence tests and EP unit suite also passed.
+
+The smoke test found and fixed two integration blockers: the dispatcher Role
+needed `get` on `pods/portforward` (the API-server connect request is GET), and
+HTTPX skipped loading EP's client certificate when its CA was configured as a
+string path. EP now builds an SSL context with the CA and client certificate
+loaded together. The Role's narrow permission set was checked: port-forward
+access succeeds, while Pod logs and exec remain denied.
+
+This is evidence for the happy path, not full release qualification. The local
+Kind cluster uses kindnet, which does not enforce NetworkPolicies. A separate
+Calico Kind attempt could not start because its containerd exhausted available
+inotify watchers, and the current OpenShift login was unauthorized. Therefore
+actual allowed-versus-blocked network traffic remains unverified and must be
+tested on an enforcing CNI, preferably the target OpenShift environment. The
+callback outage/restart, cancellation, startup failure, ambiguous Execute,
+database-role isolation, and migration-upgrade scenarios in the EP
+[Kind demo runbook](https://github.com/syntara-orchestration/syntara-execution-plane/blob/migration/ANSTRAT-1803/docs/kind-demo-runbook.md)
+also remain release checks.
+
+The merged monorepo Kind/Konflux harnesses that run Alembic from AO, write EP
+tables directly, or connect EP to Temporal are not retained as validation for
+this service boundary.
