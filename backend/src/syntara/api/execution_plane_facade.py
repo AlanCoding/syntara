@@ -89,10 +89,6 @@ class WorkItemFacadeRead(BaseModel):
     created_at: datetime
     claimed_at: datetime | None = None
     completed_at: datetime | None = None
-    resource_cleanup_status: str | None = None
-    resource_cleanup_error: str | None = None
-    completion_event_id: UUID | None = None
-    state_revision: int | None = None
 
 
 class EPCompletionEvent(BaseModel):
