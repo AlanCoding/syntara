@@ -1,1 +1,1 @@
-"""AO-owned HTTP integration and Temporal completion bridge for EP."""
+"""AO-owned HTTP client and integration sync for the Execution Plane service."""
