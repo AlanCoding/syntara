@@ -16,7 +16,6 @@ class ExecutionPlaneCompletionInbox(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint(
             "client_id",
-            "project_id",
             "work_item_id",
             "state_revision",
             name="uq_ep_completion_inbox_work_revision",
@@ -26,7 +25,6 @@ class ExecutionPlaneCompletionInbox(SQLModel, table=True):
 
     event_id: uuid.UUID = Field(primary_key=True)
     client_id: str = Field(sa_column=Column(String(128), nullable=False))
-    project_id: uuid.UUID
     work_item_id: uuid.UUID
     state_revision: int = Field(sa_column=Column(Integer, nullable=False))
     status: str = Field(sa_column=Column(String(32), nullable=False))

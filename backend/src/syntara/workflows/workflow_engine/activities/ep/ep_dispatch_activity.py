@@ -89,7 +89,6 @@ async def _lookup_activity_execution_id(execution_id: uuid.UUID, temporal_activi
 async def _dispatch_to_ep(  # noqa: C901, PLR0915 - service handoff and Temporal retry policy
     input_config: dict[str, Any],
     output_config: dict[str, str] | None,
-    project_id: uuid.UUID,
     execution_id: uuid.UUID,
 ) -> dict[str, Any] | None:
     """Persist AO's dispatch intent, then idempotently submit it to EP over HTTP."""
@@ -115,9 +114,6 @@ async def _dispatch_to_ep(  # noqa: C901, PLR0915 - service handoff and Temporal
 
     payload = await persist_dispatch_binding(
         work_item_id=work_item_id,
-        project_id=project_id,
-        execution_id=execution_id,
-        temporal_activity_id=info.activity_id,
         activity_attempt=info.attempt,
         task_token=info.task_token,
         payload=payload,
@@ -137,8 +133,7 @@ async def _dispatch_to_ep(  # noqa: C901, PLR0915 - service handoff and Temporal
         try:
             async with ExecutionPlaneHttpClient(timeout=min(settings.ep_request_timeout_seconds, remaining)) as client:
                 response = await client.submit_work_item(
-                    project_id=project_id,
-                    id=work_item_id,
+                    item_id=work_item_id,
                     payload=payload,
                 )
         except ExecutionPlaneRejectedError as exc:
@@ -191,7 +186,6 @@ async def _dispatch_to_ep(  # noqa: C901, PLR0915 - service handoff and Temporal
 async def execute_script_activity(
     input_config: dict[str, Any],
     output_config: dict[str, str] | None,
-    project_id: str,
     execution_id: str,
 ) -> dict[str, Any]:
     """Validate and submit a script, then await AO-owned callback completion."""
@@ -203,13 +197,12 @@ async def execute_script_activity(
 
     try:
         ScriptExecutorParameters.model_validate(input_config)
-        project_uuid = uuid.UUID(project_id)
         execution_uuid = uuid.UUID(execution_id)
     except Exception:  # noqa: BLE001
-        msg = "Script activity configuration or project scope is invalid"
+        msg = "Script activity configuration or execution ID is invalid"
         raise ApplicationError(msg, type="ConfigError", non_retryable=True) from None
 
-    result = await _dispatch_to_ep(input_config, output_config, project_uuid, execution_uuid)
+    result = await _dispatch_to_ep(input_config, output_config, execution_uuid)
     if result is None:
         raise_complete_async = cast("Callable[[], Any]", activity.raise_complete_async)
         raise_complete_async()

@@ -42,7 +42,7 @@ CANCELLATION_RETRY_MAX_SECONDS = 300
 class CompletionConflictReason(StrEnum):
     """Stable explanations for contradictory dispatch and result records."""
 
-    CALLBACK_SCOPE = "callback scope does not match AO's recorded dispatch"
+    CALLBACK_SCOPE = "callback client does not match AO's recorded dispatch"
     CALLBACK_WORK_ID = "callback work ID does not match AO's accepted dispatch"
     EVENT_ID_REUSED = "event ID was reused with different completion data"
     REQUEST_REVISION_REUSED = "request revision was reused with contradictory result data"
@@ -87,10 +87,10 @@ async def request_ep_cancellation_for_workflow(temporal_workflow_id: str) -> int
     """Persist cancellation intent for accepted and still-submitting EP requests."""
     now = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
-        execution_subq = select(Execution.id).where(Execution.temporal_workflow_id == temporal_workflow_id).subquery()
+        execution_subq = select(Execution.id).where(Execution.temporal_workflow_id == temporal_workflow_id)
         result = await session.exec(
             select(ActivityExecution)
-            .where(ActivityExecution.execution_id.in_(execution_subq))
+            .where(col(ActivityExecution.execution_id).in_(execution_subq))
             .where(col(ActivityExecution.ep_status).in_(["submitting", "handoff_pending"]))
             .where(col(ActivityExecution.ep_cancel_delivered_at).is_(None))
             .with_for_update(skip_locked=True)
@@ -108,9 +108,6 @@ async def request_ep_cancellation_for_workflow(temporal_workflow_id: str) -> int
 async def persist_dispatch_binding(
     *,
     work_item_id: UUID,
-    project_id: UUID,
-    execution_id: UUID,
-    temporal_activity_id: str,
     activity_attempt: int,
     task_token: bytes,
     payload: dict[str, Any],
@@ -131,7 +128,7 @@ async def persist_dispatch_binding(
             ).first()
             if ae is None:
                 msg = f"ActivityExecution not found for work_item_id={work_item_id}"
-                raise CompletionBindingNotFoundError(msg)
+                raise CompletionBindingNotFoundError(msg)  # noqa: TRY301
 
             if ae.ep_status is None:
                 # First dispatch attempt — freeze the payload
@@ -142,17 +139,16 @@ async def persist_dispatch_binding(
                 ae.ep_status = "submitting"
             else:
                 # Retry — reuse frozen payload, update token + attempt
+                if ae.ep_payload_ciphertext is None:
+                    msg = "Stored payload ciphertext is missing on retry"
+                    raise RuntimeError(msg)  # noqa: TRY301
                 ae.ep_task_token_ciphertext = token_ciphertext
                 ae.ep_activity_attempt = activity_attempt
                 ae.ep_status = "submitting"
-                frozen_payload = encryptor.decrypt_field(
-                    ae.ep_payload_ciphertext,
-                    enc_key,
-                    "execution_request",
-                )
+                frozen_payload = encryptor.decrypt_field(ae.ep_payload_ciphertext, enc_key, "execution_request")
                 if not isinstance(frozen_payload, dict):
                     msg = "Stored payload ciphertext did not decrypt to a dict"
-                    raise RuntimeError(msg)
+                    raise RuntimeError(msg)  # noqa: TRY301
                 # Reset any unprocessed inbox events so they retry with the new token
                 inbox_result = await session.exec(
                     select(ExecutionPlaneCompletionInbox).where(
@@ -199,7 +195,6 @@ async def mark_dispatch_accepted(work_item_id: UUID, *, terminal: bool) -> None:
 def _same_event(row: ExecutionPlaneCompletionInbox, event: dict[str, Any]) -> bool:
     return bool(
         row.client_id == event["client_id"]
-        and row.project_id == event["project_id"]
         and row.work_item_id == event["work_id"]
         and row.state_revision == event["state_revision"]
         and row.status == event["status"]
@@ -215,7 +210,7 @@ async def persist_completion_event(event: dict[str, Any]) -> None:
         ae = (await session.exec(select(ActivityExecution).where(ActivityExecution.id == work_item_id))).first()
         if ae is None:
             raise CompletionBindingNotFoundError(work_item_id)
-        if ae.project_id != event["project_id"]:
+        if event["client_id"] != AO_EP_CLIENT_ID:
             raise CompletionEventConflictError(CompletionConflictReason.CALLBACK_SCOPE)
 
         existing = await session.get(ExecutionPlaneCompletionInbox, event["event_id"])
@@ -228,7 +223,6 @@ async def persist_completion_event(event: dict[str, Any]) -> None:
             await session.exec(
                 select(ExecutionPlaneCompletionInbox)
                 .where(ExecutionPlaneCompletionInbox.client_id == event["client_id"])
-                .where(ExecutionPlaneCompletionInbox.project_id == event["project_id"])
                 .where(ExecutionPlaneCompletionInbox.work_item_id == work_item_id)
                 .where(ExecutionPlaneCompletionInbox.state_revision == event["state_revision"])
             )
@@ -242,7 +236,6 @@ async def persist_completion_event(event: dict[str, Any]) -> None:
             ExecutionPlaneCompletionInbox(
                 event_id=event["event_id"],
                 client_id=event["client_id"],
-                project_id=event["project_id"],
                 work_item_id=work_item_id,
                 state_revision=event["state_revision"],
                 status=event["status"],
@@ -289,7 +282,7 @@ async def _claim_due_events() -> list[ExecutionPlaneCompletionInbox]:
         return rows
 
 
-async def _claim_bindings_for_status_check() -> list[tuple[UUID, UUID]]:
+async def _claim_bindings_for_status_check() -> list[UUID]:
     """Throttle status reconciliation for accepted requests with no callback event."""
     now = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
@@ -311,18 +304,18 @@ async def _claim_bindings_for_status_check() -> list[tuple[UUID, UUID]]:
         for ae in rows:
             ae.ep_last_status_check_at = now
         await session.commit()
-        return [(ae.id, ae.project_id) for ae in rows]
+        return [ae.id for ae in rows]
 
 
 async def _reconcile_missing_events() -> None:
     """Recover terminal EP results when the durable callback delivery is unavailable."""
-    bindings = await _claim_bindings_for_status_check()
-    if not bindings:
+    work_item_ids = await _claim_bindings_for_status_check()
+    if not work_item_ids:
         return
     async with ExecutionPlaneHttpClient() as ep_client:
-        for work_item_id, project_id in bindings:
+        for work_item_id in work_item_ids:
             try:
-                state = await ep_client.get_work_item(project_id=project_id, work_item_id=work_item_id)
+                state = await ep_client.get_work_item(work_item_id=work_item_id)
             except ExecutionPlaneError as exc:
                 logger.warning(
                     "EP result reconciliation could not read accepted work",
@@ -341,7 +334,6 @@ async def _reconcile_missing_events() -> None:
             event = {
                 "event_id": UUID(str(event_id)),
                 "client_id": AO_EP_CLIENT_ID,
-                "project_id": project_id,
                 "work_id": work_item_id,
                 "state_revision": int(state_revision),
                 "status": str(state["status"]),
@@ -352,7 +344,7 @@ async def _reconcile_missing_events() -> None:
             logger.info("Recovered missing EP completion callback from status API", work_item_id=str(work_item_id))
 
 
-async def _claim_due_cancellations() -> list[tuple[UUID, UUID, int]]:
+async def _claim_due_cancellations() -> list[tuple[UUID, int]]:
     """Lease pending AO-to-EP cancellation outbox rows for one delivery attempt."""
     now = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
@@ -374,7 +366,7 @@ async def _claim_due_cancellations() -> list[tuple[UUID, UUID, int]]:
             ae.ep_cancel_lease_expires_at = now + timedelta(seconds=CALLBACK_LEASE_SECONDS)
             ae.ep_cancel_attempts += 1
         await session.commit()
-        return [(ae.id, ae.project_id, ae.ep_cancel_attempts) for ae in rows]
+        return [(ae.id, ae.ep_cancel_attempts) for ae in rows]
 
 
 async def _record_cancellation_attempt(
@@ -406,12 +398,9 @@ async def _deliver_requested_cancellations() -> None:
     if not cancellations:
         return
     async with ExecutionPlaneHttpClient() as ep_client:
-        for work_item_id, project_id, attempts in cancellations:
+        for work_item_id, attempts in cancellations:
             try:
-                state = await ep_client.cancel_work_item(
-                    project_id=project_id,
-                    work_item_id=work_item_id,
-                )
+                state = await ep_client.cancel_work_item(work_item_id=work_item_id)
                 status_value = str(state.get("status", ""))[:80]
             except ExecutionPlaneError as exc:
                 await _record_cancellation_attempt(
@@ -468,6 +457,9 @@ async def _mark_binding_delivering(work_item_id: UUID) -> tuple[bytes, int]:
             raise CompletionBindingNotReadyError
         if ae.ep_status in {"delivering", "reconciliation_required"}:
             msg = "previous Temporal completion outcome is uncertain; manual reconciliation is required"
+            raise RuntimeError(msg)
+        if ae.ep_task_token_ciphertext is None or ae.ep_activity_attempt is None:
+            msg = "ActivityExecution is missing EP token or attempt — was this a script node?"
             raise RuntimeError(msg)
         enc_key = str(work_item_id)
         encrypted = ae.ep_task_token_ciphertext
@@ -576,21 +568,17 @@ async def _deliver_one(client: Client, event: ExecutionPlaneCompletionInbox) -> 
         )
     except asyncio.CancelledError:
         raise
-    except Exception:
+    except Exception as exc:
         await _mark_event_for_reconciliation(
             event.event_id,
             work_item_id,
-            f"Temporal completion outcome is uncertain ({type(event).__name__})",
+            f"Temporal completion outcome is uncertain ({type(exc).__name__})",
             activity_attempt,
         )
         logger.exception("EP completion requires Temporal reconciliation", event_id=str(event.event_id))
     else:
         await _mark_event_processed(event.event_id, work_item_id, activity_attempt)
-        logger.info(
-            "EP completion delivered to Temporal",
-            event_id=str(event.event_id),
-            work_item_id=str(work_item_id),
-        )
+        logger.info("EP completion delivered to Temporal", event_id=str(event.event_id), work_item_id=str(work_item_id))
 
 
 async def run_completion_bridge(client: Client) -> None:
