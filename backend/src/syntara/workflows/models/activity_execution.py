@@ -10,7 +10,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Index, String, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Column, DateTime, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
@@ -84,6 +84,13 @@ class ActivityExecution(BaseResource, table=True):
         ),
         CheckConstraint("retry_count >= 0", name="ck_activity_execution_retry_count_non_negative"),
         CheckConstraint("iteration IS NULL OR iteration >= 0", name="ck_activity_execution_iteration_non_negative"),
+        Index("ix_activity_execution_ep_status", "ep_status"),
+        Index(
+            "ix_activity_execution_ep_cancel",
+            "ep_cancel_delivered_at",
+            "ep_cancel_next_attempt_at",
+            "ep_cancel_lease_expires_at",
+        ),
     )
 
     # Execution relationship
@@ -175,6 +182,29 @@ class ActivityExecution(BaseResource, table=True):
 
     # Loop tracking
     iteration: int | None = Field(None, description="Iteration number if activity is within a loop (0-indexed)")
+
+    # EP handoff state (only populated for script/EP nodes)
+    ep_task_token_ciphertext: str | None = Field(default=None, sa_column=Column(Text, nullable=True), repr=False)
+    ep_payload_ciphertext: str | None = Field(default=None, sa_column=Column(Text, nullable=True), repr=False)
+    ep_status: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
+    ep_activity_attempt: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
+    ep_last_status_check_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    ep_cancel_requested_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    ep_cancel_delivered_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    ep_cancel_next_attempt_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    ep_cancel_lease_expires_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    ep_cancel_attempts: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))
+    ep_cancel_last_error: str | None = Field(default=None, sa_column=Column(String(1000), nullable=True))
 
 
 class ActivityExecutionListResponse(ResourcesResponse[ActivityExecution]):

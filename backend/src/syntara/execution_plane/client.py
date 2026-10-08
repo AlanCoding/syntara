@@ -6,7 +6,6 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Self, cast
-from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import httpx
@@ -105,46 +104,42 @@ class ExecutionPlaneHttpClient:
         self,
         *,
         project_id: UUID,
-        request_id: str,
-        work_correlation_id: UUID,
+        id: UUID,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        """Submit work using EP's stable idempotency key."""
+        """Submit work using the ActivityExecution UUID as the stable work item identity."""
         response = await self._request(
             "POST",
             "/v1/work-items",
             project_id=project_id,
             json_body={
-                "request_id": request_id,
-                "work_correlation_id": str(work_correlation_id),
+                "id": str(id),
                 "workload_type": "script",
                 "payload": payload,
             },
         )
         return self._as_object(response)
 
-    async def get_work_item(self, *, project_id: UUID, request_id: str) -> dict[str, Any]:
-        """Read accepted work by its stable request ID."""
+    async def get_work_item(self, *, project_id: UUID, work_item_id: UUID) -> dict[str, Any]:
+        """Read accepted work by its UUID."""
         response = await self._request(
             "GET",
-            f"/v1/work-items/by-request/{quote(request_id, safe='')}",
+            f"/v1/work-items/{work_item_id}",
             project_id=project_id,
         )
         return self._as_object(response)
 
-    async def cancel_work_item_by_request_id(
+    async def cancel_work_item(
         self,
         *,
         project_id: UUID,
-        request_id: str,
-        work_correlation_id: UUID,
+        work_item_id: UUID,
     ) -> dict[str, Any]:
-        """Request cancellation by stable key, including before AO receives an EP ID."""
+        """Request cancellation of a work item by its UUID."""
         response = await self._request(
             "POST",
-            f"/v1/work-items/by-request/{quote(request_id, safe='')}/cancel",
+            f"/v1/work-items/{work_item_id}/cancel",
             project_id=project_id,
-            json_body={"work_correlation_id": str(work_correlation_id)},
         )
         return self._as_object(response)
 
