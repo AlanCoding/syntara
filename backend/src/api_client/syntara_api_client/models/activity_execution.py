@@ -55,6 +55,17 @@ class ActivityExecution:
             error_details (None | str | Unset): Error information if failed
             retry_count (int | Unset): Number of retry attempts Default: 0.
             iteration (int | None | Unset): Iteration number if activity is within a loop (0-indexed)
+            ep_task_token_ciphertext (None | str | Unset):
+            ep_payload_ciphertext (None | str | Unset):
+            ep_status (None | str | Unset):
+            ep_activity_attempt (int | None | Unset):
+            ep_last_status_check_at (datetime.datetime | None | Unset):
+            ep_cancel_requested_at (datetime.datetime | None | Unset):
+            ep_cancel_delivered_at (datetime.datetime | None | Unset):
+            ep_cancel_next_attempt_at (datetime.datetime | None | Unset):
+            ep_cancel_lease_expires_at (datetime.datetime | None | Unset):
+            ep_cancel_attempts (int | Unset):  Default: 0.
+            ep_cancel_last_error (None | str | Unset):
     """
 
     execution_id: UUID
@@ -73,6 +84,17 @@ class ActivityExecution:
     error_details: None | str | Unset = UNSET
     retry_count: int | Unset = 0
     iteration: int | None | Unset = UNSET
+    ep_task_token_ciphertext: None | str | Unset = UNSET
+    ep_payload_ciphertext: None | str | Unset = UNSET
+    ep_status: None | str | Unset = UNSET
+    ep_activity_attempt: int | None | Unset = UNSET
+    ep_last_status_check_at: datetime.datetime | None | Unset = UNSET
+    ep_cancel_requested_at: datetime.datetime | None | Unset = UNSET
+    ep_cancel_delivered_at: datetime.datetime | None | Unset = UNSET
+    ep_cancel_next_attempt_at: datetime.datetime | None | Unset = UNSET
+    ep_cancel_lease_expires_at: datetime.datetime | None | Unset = UNSET
+    ep_cancel_attempts: int | Unset = 0
+    ep_cancel_last_error: None | str | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.activity_execution_output_data_type_0 import ActivityExecutionOutputDataType0
@@ -145,6 +167,78 @@ class ActivityExecution:
         else:
             iteration = self.iteration
 
+        ep_task_token_ciphertext: None | str | Unset
+        if isinstance(self.ep_task_token_ciphertext, Unset):
+            ep_task_token_ciphertext = UNSET
+        else:
+            ep_task_token_ciphertext = self.ep_task_token_ciphertext
+
+        ep_payload_ciphertext: None | str | Unset
+        if isinstance(self.ep_payload_ciphertext, Unset):
+            ep_payload_ciphertext = UNSET
+        else:
+            ep_payload_ciphertext = self.ep_payload_ciphertext
+
+        ep_status: None | str | Unset
+        if isinstance(self.ep_status, Unset):
+            ep_status = UNSET
+        else:
+            ep_status = self.ep_status
+
+        ep_activity_attempt: int | None | Unset
+        if isinstance(self.ep_activity_attempt, Unset):
+            ep_activity_attempt = UNSET
+        else:
+            ep_activity_attempt = self.ep_activity_attempt
+
+        ep_last_status_check_at: None | str | Unset
+        if isinstance(self.ep_last_status_check_at, Unset):
+            ep_last_status_check_at = UNSET
+        elif isinstance(self.ep_last_status_check_at, datetime.datetime):
+            ep_last_status_check_at = self.ep_last_status_check_at.isoformat()
+        else:
+            ep_last_status_check_at = self.ep_last_status_check_at
+
+        ep_cancel_requested_at: None | str | Unset
+        if isinstance(self.ep_cancel_requested_at, Unset):
+            ep_cancel_requested_at = UNSET
+        elif isinstance(self.ep_cancel_requested_at, datetime.datetime):
+            ep_cancel_requested_at = self.ep_cancel_requested_at.isoformat()
+        else:
+            ep_cancel_requested_at = self.ep_cancel_requested_at
+
+        ep_cancel_delivered_at: None | str | Unset
+        if isinstance(self.ep_cancel_delivered_at, Unset):
+            ep_cancel_delivered_at = UNSET
+        elif isinstance(self.ep_cancel_delivered_at, datetime.datetime):
+            ep_cancel_delivered_at = self.ep_cancel_delivered_at.isoformat()
+        else:
+            ep_cancel_delivered_at = self.ep_cancel_delivered_at
+
+        ep_cancel_next_attempt_at: None | str | Unset
+        if isinstance(self.ep_cancel_next_attempt_at, Unset):
+            ep_cancel_next_attempt_at = UNSET
+        elif isinstance(self.ep_cancel_next_attempt_at, datetime.datetime):
+            ep_cancel_next_attempt_at = self.ep_cancel_next_attempt_at.isoformat()
+        else:
+            ep_cancel_next_attempt_at = self.ep_cancel_next_attempt_at
+
+        ep_cancel_lease_expires_at: None | str | Unset
+        if isinstance(self.ep_cancel_lease_expires_at, Unset):
+            ep_cancel_lease_expires_at = UNSET
+        elif isinstance(self.ep_cancel_lease_expires_at, datetime.datetime):
+            ep_cancel_lease_expires_at = self.ep_cancel_lease_expires_at.isoformat()
+        else:
+            ep_cancel_lease_expires_at = self.ep_cancel_lease_expires_at
+
+        ep_cancel_attempts = self.ep_cancel_attempts
+
+        ep_cancel_last_error: None | str | Unset
+        if isinstance(self.ep_cancel_last_error, Unset):
+            ep_cancel_last_error = UNSET
+        else:
+            ep_cancel_last_error = self.ep_cancel_last_error
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -178,6 +272,28 @@ class ActivityExecution:
             field_dict["retry_count"] = retry_count
         if iteration is not UNSET:
             field_dict["iteration"] = iteration
+        if ep_task_token_ciphertext is not UNSET:
+            field_dict["ep_task_token_ciphertext"] = ep_task_token_ciphertext
+        if ep_payload_ciphertext is not UNSET:
+            field_dict["ep_payload_ciphertext"] = ep_payload_ciphertext
+        if ep_status is not UNSET:
+            field_dict["ep_status"] = ep_status
+        if ep_activity_attempt is not UNSET:
+            field_dict["ep_activity_attempt"] = ep_activity_attempt
+        if ep_last_status_check_at is not UNSET:
+            field_dict["ep_last_status_check_at"] = ep_last_status_check_at
+        if ep_cancel_requested_at is not UNSET:
+            field_dict["ep_cancel_requested_at"] = ep_cancel_requested_at
+        if ep_cancel_delivered_at is not UNSET:
+            field_dict["ep_cancel_delivered_at"] = ep_cancel_delivered_at
+        if ep_cancel_next_attempt_at is not UNSET:
+            field_dict["ep_cancel_next_attempt_at"] = ep_cancel_next_attempt_at
+        if ep_cancel_lease_expires_at is not UNSET:
+            field_dict["ep_cancel_lease_expires_at"] = ep_cancel_lease_expires_at
+        if ep_cancel_attempts is not UNSET:
+            field_dict["ep_cancel_attempts"] = ep_cancel_attempts
+        if ep_cancel_last_error is not UNSET:
+            field_dict["ep_cancel_last_error"] = ep_cancel_last_error
 
         return field_dict
 
@@ -304,6 +420,138 @@ class ActivityExecution:
 
         iteration = _parse_iteration(d.pop("iteration", UNSET))
 
+        def _parse_ep_task_token_ciphertext(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        ep_task_token_ciphertext = _parse_ep_task_token_ciphertext(d.pop("ep_task_token_ciphertext", UNSET))
+
+        def _parse_ep_payload_ciphertext(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        ep_payload_ciphertext = _parse_ep_payload_ciphertext(d.pop("ep_payload_ciphertext", UNSET))
+
+        def _parse_ep_status(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        ep_status = _parse_ep_status(d.pop("ep_status", UNSET))
+
+        def _parse_ep_activity_attempt(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        ep_activity_attempt = _parse_ep_activity_attempt(d.pop("ep_activity_attempt", UNSET))
+
+        def _parse_ep_last_status_check_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                ep_last_status_check_at_type_0 = isoparse(data)
+
+                return ep_last_status_check_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        ep_last_status_check_at = _parse_ep_last_status_check_at(d.pop("ep_last_status_check_at", UNSET))
+
+        def _parse_ep_cancel_requested_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                ep_cancel_requested_at_type_0 = isoparse(data)
+
+                return ep_cancel_requested_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        ep_cancel_requested_at = _parse_ep_cancel_requested_at(d.pop("ep_cancel_requested_at", UNSET))
+
+        def _parse_ep_cancel_delivered_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                ep_cancel_delivered_at_type_0 = isoparse(data)
+
+                return ep_cancel_delivered_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        ep_cancel_delivered_at = _parse_ep_cancel_delivered_at(d.pop("ep_cancel_delivered_at", UNSET))
+
+        def _parse_ep_cancel_next_attempt_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                ep_cancel_next_attempt_at_type_0 = isoparse(data)
+
+                return ep_cancel_next_attempt_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        ep_cancel_next_attempt_at = _parse_ep_cancel_next_attempt_at(d.pop("ep_cancel_next_attempt_at", UNSET))
+
+        def _parse_ep_cancel_lease_expires_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                ep_cancel_lease_expires_at_type_0 = isoparse(data)
+
+                return ep_cancel_lease_expires_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        ep_cancel_lease_expires_at = _parse_ep_cancel_lease_expires_at(d.pop("ep_cancel_lease_expires_at", UNSET))
+
+        ep_cancel_attempts = d.pop("ep_cancel_attempts", UNSET)
+
+        def _parse_ep_cancel_last_error(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        ep_cancel_last_error = _parse_ep_cancel_last_error(d.pop("ep_cancel_last_error", UNSET))
+
         activity_execution = cls(
             execution_id=execution_id,
             activity_name=activity_name,
@@ -321,6 +569,17 @@ class ActivityExecution:
             error_details=error_details,
             retry_count=retry_count,
             iteration=iteration,
+            ep_task_token_ciphertext=ep_task_token_ciphertext,
+            ep_payload_ciphertext=ep_payload_ciphertext,
+            ep_status=ep_status,
+            ep_activity_attempt=ep_activity_attempt,
+            ep_last_status_check_at=ep_last_status_check_at,
+            ep_cancel_requested_at=ep_cancel_requested_at,
+            ep_cancel_delivered_at=ep_cancel_delivered_at,
+            ep_cancel_next_attempt_at=ep_cancel_next_attempt_at,
+            ep_cancel_lease_expires_at=ep_cancel_lease_expires_at,
+            ep_cancel_attempts=ep_cancel_attempts,
+            ep_cancel_last_error=ep_cancel_last_error,
         )
 
         return activity_execution
