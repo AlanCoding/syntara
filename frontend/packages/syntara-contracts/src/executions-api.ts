@@ -315,6 +315,31 @@ export interface components {
        * @description Iteration number if activity is within a loop (0-indexed)
        */
       iteration?: number | null
+      /** Ep Task Token Ciphertext */
+      ep_task_token_ciphertext?: string | null
+      /** Ep Payload Ciphertext */
+      ep_payload_ciphertext?: string | null
+      /** Ep Status */
+      ep_status?: string | null
+      /** Ep Activity Attempt */
+      ep_activity_attempt?: number | null
+      /** Ep Last Status Check At */
+      ep_last_status_check_at?: string | null
+      /** Ep Cancel Requested At */
+      ep_cancel_requested_at?: string | null
+      /** Ep Cancel Delivered At */
+      ep_cancel_delivered_at?: string | null
+      /** Ep Cancel Next Attempt At */
+      ep_cancel_next_attempt_at?: string | null
+      /** Ep Cancel Lease Expires At */
+      ep_cancel_lease_expires_at?: string | null
+      /**
+       * Ep Cancel Attempts
+       * @default 0
+       */
+      ep_cancel_attempts?: number
+      /** Ep Cancel Last Error */
+      ep_cancel_last_error?: string | null
     }
     /**
      * ActivityData

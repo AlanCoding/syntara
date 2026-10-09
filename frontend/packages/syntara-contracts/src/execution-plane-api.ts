@@ -86,17 +86,10 @@ export interface components {
       /** Client Id */
       client_id: string
       /**
-       * Project Id
-       * Format: uuid
-       */
-      project_id: string
-      /**
        * Work Id
        * Format: uuid
        */
       work_id: string
-      /** Request Id */
-      request_id: string
       /** State Revision */
       state_revision: number
       /**
@@ -227,18 +220,6 @@ export interface components {
        * Format: uuid
        */
       id: string
-      /**
-       * Project Id
-       * Format: uuid
-       */
-      project_id: string
-      /** Request Id */
-      request_id: string
-      /**
-       * Work Correlation Id
-       * Format: uuid
-       */
-      work_correlation_id: string
       /** Status */
       status: string
       /** Result */
