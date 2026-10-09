@@ -211,6 +211,27 @@ describe('useExecutionApprovalPanel', () => {
     expect(mockSetApprovalsAndIndex).toHaveBeenCalledWith([mockApproval], 0)
   })
 
+  it('auto-detection callback does not open panel when run history is open', async () => {
+    const { useAutoApprovalDetection } = await import('./useAutoApprovalDetection')
+
+    let capturedCallback: ((a: Approval) => void) | undefined
+    vi.mocked(useAutoApprovalDetection).mockImplementation((opts: { onApprovalDetected: (a: Approval) => void }) => {
+      capturedCallback = opts.onApprovalDetected
+    })
+
+    mockFetchApprovals.mockResolvedValue([mockApproval])
+
+    const { result } = renderHook(() => useExecutionApprovalPanel('exec-1', 'history=open', makeNodeClick(), undefined))
+
+    await act(async () => {
+      capturedCallback!(mockApproval)
+      await vi.runAllTimersAsync()
+    })
+
+    expect(result.current.panelOpen).toBe(false)
+    expect(mockSetApprovalsAndIndex).toHaveBeenCalledWith([mockApproval], 0)
+  })
+
   it('returns approvalMessage from workflow definition', () => {
     const nodeClick = makeNodeClick(mockApproval, [mockApproval])
     const wfDef = {
@@ -351,7 +372,7 @@ describe('useExecutionApprovalPanel', () => {
   it('handles URL approval not in fetched list (defaults to first approval)', async () => {
     const { useFetchApprovalForUrlParam } = await import('./useFetchApprovalForUrlParam')
     const urlApproval = { ...mockApproval, id: 'url-approval-not-in-list' }
-    vi.mocked(useFetchApprovalForUrlParam).mockReturnValue(urlApproval as Approval)
+    vi.mocked(useFetchApprovalForUrlParam).mockReturnValue(urlApproval)
     mockFetchApprovals.mockResolvedValue([mockApproval]) // URL approval not in the fetched list
 
     const { result } = renderHook(() =>
@@ -437,7 +458,7 @@ describe('useExecutionApprovalPanel', () => {
     renderHook(() => useExecutionApprovalPanel('exec-1', '', makeNodeClick(), undefined))
 
     await act(async () => {
-      capturedCallback!(detectedApproval as Approval)
+      capturedCallback!(detectedApproval)
       await vi.runAllTimersAsync()
     })
 

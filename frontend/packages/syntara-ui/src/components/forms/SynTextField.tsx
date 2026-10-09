@@ -38,8 +38,12 @@ export type SynTextFieldProps<
   placeholder?: string
   /** Disables the input. */
   isDisabled?: boolean
+  /** HTML `autocomplete` attribute forwarded to the underlying `TextInput`. */
+  autoComplete?: string
   /** Input type. Defaults to `'text'`. */
   type?: 'text' | 'email' | 'password' | 'search' | 'tel' | 'url' | 'number'
+  /** Accessible name when the visible `FormGroup` label is not exposed to assistive tech. */
+  ariaLabel?: string
 }
 
 /**
@@ -73,7 +77,9 @@ export function SynTextField<
   hint,
   placeholder,
   isDisabled,
+  autoComplete,
   type = 'text',
+  ariaLabel,
 }: Readonly<SynTextFieldProps<TFieldValues, TName>>) {
   const resolvedFieldId = fieldId ?? name
 
@@ -98,6 +104,8 @@ export function SynTextField<
           onBlur={field.onBlur}
           name={field.name}
           isDisabled={isDisabled}
+          autoComplete={autoComplete}
+          aria-label={ariaLabel}
         />
       )}
     </SynFormField>
