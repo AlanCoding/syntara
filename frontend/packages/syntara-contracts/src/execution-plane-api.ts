@@ -55,7 +55,7 @@ export interface paths {
     put?: never
     /**
      * Accept an Execution Plane completion event
-     * @description Complete the AO async activity named by an EP callback; EP retries until this returns 2xx.
+     * @description Complete the AO async activity named by an EP completion callback; EP retries until 2xx.
      */
     post: operations['accept_execution_plane_event']
     delete?: never
