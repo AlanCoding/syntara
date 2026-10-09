@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from unittest.mock import patch
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
@@ -25,8 +24,7 @@ from tests.fixtures.settings import FakeSettingsCache
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
-    from sqlmodel.ext.asyncio.session import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine
     from temporalio.client import Client
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -82,7 +80,6 @@ async def _temporal_server() -> AsyncGenerator[WorkflowEnvironment, None]:
 async def temporal_env(
     _temporal_server: WorkflowEnvironment,
     test_db_engine: AsyncEngine,
-    test_session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncGenerator[WorkflowEnvironment, None]:
     """Pair Temporal with a test double for the independently deployed EP API."""
@@ -97,10 +94,7 @@ async def temporal_env(
 
     monkeypatch.setattr(ep_dispatch_activity, "_lookup_activity_execution_id", _fake_lookup_activity_execution_id)
 
-    with (
-        patch("syntara.execution_plane.bridge.AsyncSessionLocal", test_session_factory),
-        _temporal_server.auto_time_skipping_disabled(),
-    ):
+    with _temporal_server.auto_time_skipping_disabled():
         yield _temporal_server
 
 

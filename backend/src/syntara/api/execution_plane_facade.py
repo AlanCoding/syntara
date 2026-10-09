@@ -9,14 +9,19 @@ from uuid import UUID  # noqa: TC003 — Pydantic resolves model annotations at 
 import structlog
 from fastapi import Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: TC002 — FastAPI resolves dependency annotations
+from temporalio.exceptions import ApplicationError
 
 from syntara.authz.dependencies import ProjectScopeFilter
 from syntara.authz.engine import AllowedProjectsResult  # noqa: TC001 — FastAPI resolves dependency annotations
 from syntara.core.config.base import get_settings
+from syntara.core.database.session import get_db
 from syntara.core.syntara_router import NO_PERMISSION, SyntaraRouter
-from syntara.execution_plane.bridge import CompletionBindingNotFoundError, deliver_ep_completion
 from syntara.execution_plane.client import ExecutionPlaneHttpClient, ExecutionPlaneUnavailableError
 from syntara.workflows.executions_router import get_temporal_execution_service
+from syntara.workflows.models.activity_execution import ActivityExecution
+from syntara.workflows.models.execution import Execution
 from syntara.workflows.workflow_engine.services.temporal_execution_service import (
     TemporalExecutionService,  # noqa: TC001 — FastAPI resolves dependency annotations
 )
@@ -175,6 +180,27 @@ async def _list_ep_resources(
     return await client.list_execution_targets(limit=limit)
 
 
+def _ep_failure_error(status_value: str, result: dict[str, object]) -> ApplicationError:
+    """Translate a non-completed EP status into a non-retryable activity failure."""
+    if status_value == "cancelled":
+        return ApplicationError(
+            "Execution Plane work was cancelled before execution",
+            result,
+            type="ExecutionPlaneWorkCancelled",
+            non_retryable=True,
+        )
+    if status_value == "reconciliation_required":
+        return ApplicationError(
+            "Execution Plane could not determine the work outcome",
+            result,
+            type="ExecutionPlaneReconciliationRequired",
+            non_retryable=True,
+        )
+    error_message = str(result.get("error", "Execution Plane work failed"))
+    error_type = str(result.get("error_type", "ScriptExecutionError"))
+    return ApplicationError(error_message, result, type=error_type, non_retryable=True)
+
+
 @router.post(
     "/events",
     status_code=status.HTTP_202_ACCEPTED,
@@ -185,9 +211,14 @@ async def _list_ep_resources(
 async def accept_execution_plane_event(
     request: Request,
     event: EPCompletionEvent,
+    session: Annotated[AsyncSession, Depends(get_db)],
     temporal_service: Annotated[TemporalExecutionService | None, Depends(get_temporal_execution_service)],
 ) -> dict[str, str]:
     """Complete the AO async activity named by an EP callback; EP retries until this returns 2xx."""
+    # The work item UUID is ActivityExecution.id, so AO resolves the activity's
+    # (temporal_workflow_id, temporal_activity_id) and completes it the same way approval and
+    # agentic callbacks do — no task token or AO-side dispatch state. Re-delivery is idempotent:
+    # an already-resolved activity is a Temporal no-op.
     settings = get_settings()
     if (
         not getattr(request.state, "is_cert_authenticated", False)
@@ -196,12 +227,29 @@ async def accept_execution_plane_event(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Execution Plane service identity required")
     if temporal_service is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Temporal is unavailable")
-    try:
-        await deliver_ep_completion(event.model_dump(), temporal_service)
-    except CompletionBindingNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No matching AO activity for this work item",
-        ) from exc
-    logger.info("Delivered Execution Plane completion event", event_id=str(event.event_id))
+
+    row = (
+        await session.exec(
+            select(Execution.temporal_workflow_id, ActivityExecution.temporal_activity_id)
+            .join(Execution, col(ActivityExecution.execution_id) == col(Execution.id))
+            .where(col(ActivityExecution.id) == event.work_id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching AO activity for this work item")
+    temporal_workflow_id, temporal_activity_id = row
+
+    if event.status == "completed":
+        await temporal_service.complete_async_activity(
+            temporal_workflow_id=temporal_workflow_id,
+            activity_id=temporal_activity_id,
+            result=event.result,
+        )
+    else:
+        await temporal_service.fail_async_activity(
+            temporal_workflow_id=temporal_workflow_id,
+            activity_id=temporal_activity_id,
+            error=_ep_failure_error(event.status, event.result),
+        )
+    logger.info("Delivered Execution Plane completion event", event_id=str(event.event_id), status=event.status)
     return {"status": "accepted"}
