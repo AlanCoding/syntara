@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 import pytest_asyncio
@@ -90,6 +91,22 @@ async def temporal_env(
     database_url = test_db_engine.url
     monkeypatch.setenv("APP_DATABASE_URL", database_url.render_as_string(hide_password=False))
     monkeypatch.setattr(ep_dispatch_activity, "ExecutionPlaneHttpClient", FakeExecutionPlaneHttpClient)
+
+    async def _fake_lookup_activity_execution_id(execution_id: UUID, temporal_activity_id: str) -> UUID:
+        return uuid5(NAMESPACE_URL, f"{execution_id}:{temporal_activity_id}")
+
+    async def _fake_persist_dispatch_binding(
+        *, work_item_id: UUID, activity_attempt: int, task_token: bytes, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        return payload
+
+    async def _fake_mark_dispatch_accepted(work_item_id: UUID, *, terminal: bool) -> None:
+        pass
+
+    monkeypatch.setattr(ep_dispatch_activity, "_lookup_activity_execution_id", _fake_lookup_activity_execution_id)
+    monkeypatch.setattr(ep_dispatch_activity, "persist_dispatch_binding", _fake_persist_dispatch_binding)
+    monkeypatch.setattr(ep_dispatch_activity, "mark_dispatch_accepted", _fake_mark_dispatch_accepted)
+
     with (
         patch("syntara.execution_plane.bridge.AsyncSessionLocal", test_session_factory),
         _temporal_server.auto_time_skipping_disabled(),
