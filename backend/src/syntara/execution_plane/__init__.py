@@ -1,1 +1,1 @@
-"""AO-owned HTTP client and integration sync for the Execution Plane service."""
+"""AO-side Execution Plane integration: HTTP client, completion bridge, and integration sync."""

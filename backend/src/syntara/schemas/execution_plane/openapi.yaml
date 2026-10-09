@@ -80,7 +80,7 @@ paths:
       tags:
         - Execution Plane
       summary: Accept an Execution Plane completion event
-      description: Complete the AO async activity named by an EP callback; EP retries until this returns 2xx.
+      description: Complete the AO async activity named by an EP completion callback; EP retries until 2xx.
       operationId: accept_execution_plane_event
       requestBody:
         content:
