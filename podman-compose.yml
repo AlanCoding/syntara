@@ -148,7 +148,7 @@ services:
         DOWNSTREAM_OVERRIDE: ${DOWNSTREAM_OVERRIDE:-scratch}
         BRANDING: ${BRANDING:-false}
       context: ./backend
-      dockerfile: Containerfile
+      dockerfile: containers/syntara/Containerfile
       target: syntara
     image: ${APP_IMAGE:-localhost/syntara:latest}
     restart: unless-stopped
