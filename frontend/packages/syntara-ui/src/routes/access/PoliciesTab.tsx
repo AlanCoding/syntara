@@ -7,6 +7,7 @@ import { useCallback, useMemo } from 'react'
 import { IconLabel } from '../../components/IconLabel'
 import { SynListPanelTable, SynListPanelToolbar, SynListPanelView } from '../../components/panels/list/SynListPanel'
 import { SynEmptyStateNoData } from '../../components/states/SynEmptyStateNoData'
+import { SynCodeTruncateCell } from '../../components/table/SynCodeTruncateCell'
 import { useCursorReset } from '../../hooks/useCursorPagination'
 import { useDialogState } from '../../hooks/useDialogState'
 import { FilterOperatorEnum, FilterTypeEnum } from '../../types/filters'
@@ -107,9 +108,7 @@ function PoliciesTableBody({
         {policies.map((policy) => (
           <Tr key={policy.id} data-testid={`policy-row-${policy.id}`}>
             <Td dataLabel="Name">
-              <code>
-                <Truncate content={policy.name} />
-              </code>
+              <SynCodeTruncateCell content={policy.name} />
             </Td>
             <Td dataLabel="Description">
               <Truncate content={policy.description ?? '-'} />
@@ -166,7 +165,13 @@ export function PoliciesTab() {
   const policies = useMemo(() => (data?.resources ?? []).map(toPolicyRead), [data?.resources])
   const refetch = useCallback(() => detachPromise(policiesQuery.refetch()), [policiesQuery])
 
-  useCursorReset(policies.length, hasActiveFilters, cursor, policiesQuery.isFetching, resetPagination)
+  useCursorReset({
+    itemCount: policies.length,
+    hasActiveFilters,
+    cursor,
+    isFetching: policiesQuery.isFetching,
+    resetPagination,
+  })
 
   const showToolbar = policies.length > 0 || hasActiveFilters
   const policyJsonItem = policyJsonDialog.item

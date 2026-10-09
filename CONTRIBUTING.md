@@ -52,6 +52,11 @@ See [AI_POLICY.md](.github/AI_POLICY.md) for the full policy.
 4. Open a pull request targeting `devel` — the PR template will guide you through the checklist
 5. Link any related issues in the PR description
 
+If your PR addresses a Jira work item, link it in the PR description. PRs that
+don't reference a Jira work item are considered community contributions and
+should have the `community` label. Please add it, or ask a maintainer to add it
+if you don't have permission to manage labels.
+
 ## CI Checks
 
 Pull requests to `devel` run **GitHub Actions** and **Konflux**. Both are
@@ -132,6 +137,11 @@ classification for GitHub Actions is documented in
 Konflux pipelines use path filters in `.tekton/`. If those paths did not change,
 the pipeline will not start and the matching Konflux Gate job skips after its
 startup window.
+
+GitHub **CI Frontend** path detection strips `frontend/.cursor*` paths before
+deciding whether to run the full stack (synced Cursor rules are not product
+code). PRs that only touch `.claude/skills/` already skip that stack because
+those paths do not match the `frontend/` filter.
 
 ### Fork PRs
 
