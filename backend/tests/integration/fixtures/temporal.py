@@ -95,17 +95,7 @@ async def temporal_env(
     async def _fake_lookup_activity_execution_id(execution_id: UUID, temporal_activity_id: str) -> UUID:
         return uuid5(NAMESPACE_URL, f"{execution_id}:{temporal_activity_id}")
 
-    async def _fake_persist_dispatch_binding(
-        *, work_item_id: UUID, activity_attempt: int, task_token: bytes, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        return payload
-
-    async def _fake_mark_dispatch_accepted(work_item_id: UUID, *, terminal: bool) -> None:
-        pass
-
     monkeypatch.setattr(ep_dispatch_activity, "_lookup_activity_execution_id", _fake_lookup_activity_execution_id)
-    monkeypatch.setattr(ep_dispatch_activity, "persist_dispatch_binding", _fake_persist_dispatch_binding)
-    monkeypatch.setattr(ep_dispatch_activity, "mark_dispatch_accepted", _fake_mark_dispatch_accepted)
 
     with (
         patch("syntara.execution_plane.bridge.AsyncSessionLocal", test_session_factory),

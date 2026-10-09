@@ -55,12 +55,6 @@ def _mock_activity_context() -> Generator[MagicMock, None, None]:
         patch.object(activity_module, "ExecutionPlaneHttpClient", _FakeEPClient),
         patch.object(
             activity_module,
-            "persist_dispatch_binding",
-            new_callable=lambda: AsyncMock(side_effect=lambda **kwargs: kwargs["payload"]),
-        ),
-        patch.object(activity_module, "mark_dispatch_accepted", new_callable=AsyncMock),
-        patch.object(
-            activity_module,
             "_lookup_activity_execution_id",
             new_callable=lambda: AsyncMock(return_value=WORK_ITEM_ID),
         ),

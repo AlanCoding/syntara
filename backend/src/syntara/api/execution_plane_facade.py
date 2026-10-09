@@ -14,12 +14,12 @@ from syntara.authz.dependencies import ProjectScopeFilter
 from syntara.authz.engine import AllowedProjectsResult  # noqa: TC001 — FastAPI resolves dependency annotations
 from syntara.core.config.base import get_settings
 from syntara.core.syntara_router import NO_PERMISSION, SyntaraRouter
-from syntara.execution_plane.bridge import (
-    CompletionBindingNotFoundError,
-    CompletionEventConflictError,
-    persist_completion_event,
-)
+from syntara.execution_plane.bridge import CompletionBindingNotFoundError, deliver_ep_completion
 from syntara.execution_plane.client import ExecutionPlaneHttpClient, ExecutionPlaneUnavailableError
+from syntara.workflows.executions_router import get_temporal_execution_service
+from syntara.workflows.workflow_engine.services.temporal_execution_service import (
+    TemporalExecutionService,  # noqa: TC001 — FastAPI resolves dependency annotations
+)
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -99,7 +99,7 @@ class EPCompletionEvent(BaseModel):
     client_id: str
     work_id: UUID
     state_revision: int
-    status: Literal["completed", "failed", "cancelled"]
+    status: Literal["completed", "failed", "cancelled", "reconciliation_required"]
     result: dict[str, object]
     completed_at: datetime
 
@@ -182,19 +182,26 @@ async def _list_ep_resources(
     operation_id="accept_execution_plane_event",
     summary="Accept an Execution Plane completion event",
 )
-async def accept_execution_plane_event(request: Request, event: EPCompletionEvent) -> dict[str, str]:
-    """Persist an EP callback before acknowledging delivery to the producer."""
+async def accept_execution_plane_event(
+    request: Request,
+    event: EPCompletionEvent,
+    temporal_service: Annotated[TemporalExecutionService | None, Depends(get_temporal_execution_service)],
+) -> dict[str, str]:
+    """Complete the AO async activity named by an EP callback; EP retries until this returns 2xx."""
     settings = get_settings()
     if (
         not getattr(request.state, "is_cert_authenticated", False)
         or getattr(request.state, "cert_cn", None) != settings.ep_callback_service_cn
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Execution Plane service identity required")
+    if temporal_service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Temporal is unavailable")
     try:
-        await persist_completion_event(event.model_dump())
+        await deliver_ep_completion(event.model_dump(), temporal_service)
     except CompletionBindingNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No matching AO dispatch is recorded") from exc
-    except CompletionEventConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    logger.info("Persisted Execution Plane completion event", event_id=str(event.event_id))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No matching AO activity for this work item",
+        ) from exc
+    logger.info("Delivered Execution Plane completion event", event_id=str(event.event_id))
     return {"status": "accepted"}

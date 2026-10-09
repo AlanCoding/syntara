@@ -55,7 +55,7 @@ export interface paths {
     put?: never
     /**
      * Accept an Execution Plane completion event
-     * @description Persist an EP callback before acknowledging delivery to the producer.
+     * @description Complete the AO async activity named by an EP callback; EP retries until this returns 2xx.
      */
     post: operations['accept_execution_plane_event']
     delete?: never
@@ -96,7 +96,7 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: 'completed' | 'failed' | 'cancelled'
+      status: 'completed' | 'failed' | 'cancelled' | 'reconciliation_required'
       /** Result */
       result: {
         [key: string]: unknown

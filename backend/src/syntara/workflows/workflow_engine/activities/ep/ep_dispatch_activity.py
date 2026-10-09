@@ -13,7 +13,6 @@ from temporalio.exceptions import ApplicationError
 
 from syntara.core.config.base import get_settings
 from syntara.core.database.session import AsyncSessionLocal
-from syntara.execution_plane.bridge import mark_dispatch_accepted, persist_dispatch_binding
 from syntara.execution_plane.client import (
     ExecutionPlaneHttpClient,
     ExecutionPlaneRejectedError,
@@ -112,13 +111,6 @@ async def _dispatch_to_ep(  # noqa: C901, PLR0915 - service handoff and Temporal
         "output_config": output_config,
     }
 
-    payload = await persist_dispatch_binding(
-        work_item_id=work_item_id,
-        activity_attempt=info.attempt,
-        task_token=info.task_token,
-        payload=payload,
-    )
-
     timeout_seconds = float(input_config.get(ENGINE_TIMEOUT_SECONDS_KEY, 300))
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_seconds
@@ -153,10 +145,6 @@ async def _dispatch_to_ep(  # noqa: C901, PLR0915 - service handoff and Temporal
             continue
 
         state = str(response["status"])
-        await mark_dispatch_accepted(
-            work_item_id,
-            terminal=state in {"completed", "failed", "cancelled"},
-        )
         if state == "completed":
             result = response.get("result")
             return result if isinstance(result, dict) else {}
