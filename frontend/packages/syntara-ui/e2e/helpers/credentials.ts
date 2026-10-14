@@ -285,9 +285,7 @@ export async function filterCredentialByName(app: Page, name: string) {
  */
 export async function navigateToCredentialDetail(app: Page, credentialName: string) {
   await goToCredentialsList(app)
-
-  await app.getByPlaceholder('Filter by keyword').fill(credentialName)
-  await app.getByRole('button', { name: 'Apply filter' }).click()
+  await filterCredentialByName(app, credentialName)
 
   const table = app.getByRole('grid', { name: 'Credentials table' })
   await table.getByRole('link', { name: credentialName, exact: true }).click()
