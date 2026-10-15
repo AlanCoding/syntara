@@ -216,14 +216,6 @@ class ExecutionPlaneHttpClient:
         return response
 
     @staticmethod
-    def _as_list(response: dict[str, Any] | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-        """Require an array response for list endpoints."""
-        if not isinstance(response, list):
-            msg = "Execution Plane returned an invalid list response"
-            raise ExecutionPlaneRejectedError(msg)
-        return response
-
-    @staticmethod
     def _as_page(response: dict[str, Any] | list[dict[str, Any]] | None) -> dict[str, Any]:
         """Require a pagination envelope from list endpoints."""
         if not isinstance(response, dict) or "resources" not in response:
