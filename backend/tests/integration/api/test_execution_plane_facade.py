@@ -78,8 +78,9 @@ class TestExecutionTargetsPagination:
         self,
         auth_client: AsyncClient,
     ) -> None:
+        ep_page = {"resources": [_TARGET_1, _TARGET_2], "next": "eyJpZCI6Im5leHQifQ", "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[_TARGET_1, _TARGET_2]))
+            ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
                 "/api/execution_plane/v1/execution_targets",
                 params={"limit": 2},
@@ -90,17 +91,18 @@ class TestExecutionTargetsPagination:
         assert len(body["resources"]) == 2
         assert body["resources"][0]["name"] == "workers-1"
         assert body["resources"][1]["name"] == "workers-2"
-        assert "next" in body
-        assert "prev" in body
-        assert "total" in body
+        assert body["next"] == "eyJpZCI6Im5leHQifQ"
+        assert body["prev"] is None
+        assert body["total"] is None
 
     @pytest.mark.asyncio
     async def test_limit_forwarded_to_ep(
         self,
         auth_client: AsyncClient,
     ) -> None:
+        ep_page = {"resources": [_TARGET_1], "next": None, "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[_TARGET_1]))
+            route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             await auth_client.get(
                 "/api/execution_plane/v1/execution_targets",
                 params={"limit": 7},
@@ -109,48 +111,55 @@ class TestExecutionTargetsPagination:
         assert "limit=7" in str(route.calls.last.request.url)
 
     @pytest.mark.asyncio
-    async def test_cursor_accepted_but_not_forwarded_to_ep(
+    async def test_cursor_forwarded_to_ep(
         self,
         auth_client: AsyncClient,
     ) -> None:
-        """Cursor is a valid query param (BaseListParams) but EP does not support it."""
+        """Cursor is forwarded to EP and EP's next/prev cursors are passed through."""
+        ep_page = {"resources": [_TARGET_2], "next": None, "prev": "eyJpZCI6InByZXYifQ", "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[_TARGET_2]))
+            route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
                 "/api/execution_plane/v1/execution_targets",
                 params={"limit": 1, "cursor": "some_opaque_cursor"},
             )
 
         assert resp.status_code == 200
-        assert "cursor" not in str(route.calls.last.request.url)
+        assert "cursor=some_opaque_cursor" in str(route.calls.last.request.url)
+        assert resp.json()["prev"] == "eyJpZCI6InByZXYifQ"
 
     @pytest.mark.asyncio
-    async def test_sort_accepted(
+    async def test_sort_forwarded_to_ep(
         self,
         auth_client: AsyncClient,
     ) -> None:
+        ep_page = {"resources": [], "next": None, "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE) as ep:
-            ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[]))
+            route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
                 "/api/execution_plane/v1/execution_targets",
                 params={"sort": "-created_at"},
             )
 
         assert resp.status_code == 200
+        assert "sort=-created_at" in str(route.calls.last.request.url)
 
     @pytest.mark.asyncio
-    async def test_include_total_accepted(
+    async def test_include_total_forwarded_to_ep(
         self,
         auth_client: AsyncClient,
     ) -> None:
+        ep_page = {"resources": [], "next": None, "prev": None, "total": 42}
         with respx.mock(base_url=_EP_BASE) as ep:
-            ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[]))
+            route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
                 "/api/execution_plane/v1/execution_targets",
                 params={"include_total": "true"},
             )
 
         assert resp.status_code == 200
+        assert "include_total=true" in str(route.calls.last.request.url)
+        assert resp.json()["total"] == 42
 
     @pytest.mark.asyncio
     async def test_invalid_limit_too_low_returns_422(
@@ -205,8 +214,9 @@ class TestWorkItemsPagination:
         self,
         auth_client: AsyncClient,
     ) -> None:
+        ep_page = {"resources": [_WORK_ITEM_1], "next": None, "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            ep.get("/v1/work-items").mock(return_value=Response(200, json=[_WORK_ITEM_1]))
+            ep.get("/v1/work-items").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
                 "/api/execution_plane/v1/work_items",
                 params={"limit": 1},
@@ -216,14 +226,16 @@ class TestWorkItemsPagination:
         body = resp.json()
         assert len(body["resources"]) == 1
         assert body["resources"][0]["status"] == "completed"
+        assert body["next"] is None
 
     @pytest.mark.asyncio
     async def test_limit_forwarded_to_ep(
         self,
         auth_client: AsyncClient,
     ) -> None:
+        ep_page = {"resources": [], "next": None, "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            route = ep.get("/v1/work-items").mock(return_value=Response(200, json=[]))
+            route = ep.get("/v1/work-items").mock(return_value=Response(200, json=ep_page))
             await auth_client.get(
                 "/api/execution_plane/v1/work_items",
                 params={"limit": 5},

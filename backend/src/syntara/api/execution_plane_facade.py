@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 — Pydantic resolves model annotations at runtime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID  # noqa: TC003 — Pydantic resolves model annotations at runtime
 
 import structlog
@@ -99,20 +99,25 @@ async def list_execution_targets(
     """Read registered execution targets from EP after AO permission checks."""
     try:
         async with ExecutionPlaneHttpClient() as client:
-            items = await _list_ep_resources(
+            page = await _list_ep_resources(
                 client,
                 operation="execution_targets",
                 allowed_projects=allowed_projects,
-                limit=params.limit,
+                params=params,
             )
     except ExecutionPlaneUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Execution Plane unavailable",
         ) from exc
-    resources = [ExecutionTargetFacadeRead.model_validate(item) for item in items]
+    resources = [ExecutionTargetFacadeRead.model_validate(item) for item in page["resources"]]
     logger.info("Listed execution targets", count=len(resources))
-    return ExecutionTargetListResponse(resources=resources)
+    return ExecutionTargetListResponse(
+        resources=resources,
+        next=page.get("next"),
+        prev=page.get("prev"),
+        total=page.get("total"),
+    )
 
 
 @router.get(
@@ -128,20 +133,25 @@ async def list_work_items(
     """Read work-item state from EP after AO permission checks."""
     try:
         async with ExecutionPlaneHttpClient() as client:
-            items = await _list_ep_resources(
+            page = await _list_ep_resources(
                 client,
                 operation="work_items",
                 allowed_projects=allowed_projects,
-                limit=params.limit,
+                params=params,
             )
     except ExecutionPlaneUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Execution Plane unavailable",
         ) from exc
-    resources = [WorkItemFacadeRead.model_validate(item) for item in items]
+    resources = [WorkItemFacadeRead.model_validate(item) for item in page["resources"]]
     logger.info("Listed work items", count=len(resources))
-    return WorkItemListResponse(resources=resources)
+    return WorkItemListResponse(
+        resources=resources,
+        next=page.get("next"),
+        prev=page.get("prev"),
+        total=page.get("total"),
+    )
 
 
 async def _list_ep_resources(
@@ -149,11 +159,17 @@ async def _list_ep_resources(
     *,
     operation: Literal["execution_targets", "work_items"],
     allowed_projects: AllowedProjectsResult,
-    limit: int,
-) -> list[dict[str, object]]:
+    params: BaseListParams,
+) -> dict[str, Any]:
     """List EP resources after AO permission checks. EP has no project scope."""
     if not allowed_projects.all_projects and not allowed_projects.project_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No project-scoped access to EP resources")
+    kwargs = {
+        "limit": params.limit,
+        "cursor": params.cursor,
+        "sort": params.sort,
+        "include_total": params.include_total,
+    }
     if operation == "work_items":
-        return await client.list_work_items(limit=limit)
-    return await client.list_execution_targets(limit=limit)
+        return await client.list_work_items(**kwargs)
+    return await client.list_execution_targets(**kwargs)
