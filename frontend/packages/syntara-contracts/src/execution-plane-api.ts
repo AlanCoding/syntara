@@ -325,7 +325,14 @@ export interface operations {
   list_execution_targets: {
     parameters: {
       query?: {
+        /** @description Maximum number of results per page */
         limit?: number
+        /** @description Pagination cursor from previous response */
+        cursor?: string | null
+        /** @description Sort parameter (e.g., 'name', '-created_at') */
+        sort?: string | null
+        /** @description Include total count in response (expensive) */
+        include_total?: boolean
       }
       header?: never
       path?: never
@@ -356,7 +363,14 @@ export interface operations {
   list_work_items: {
     parameters: {
       query?: {
+        /** @description Maximum number of results per page */
         limit?: number
+        /** @description Pagination cursor from previous response */
+        cursor?: string | null
+        /** @description Sort parameter (e.g., 'name', '-created_at') */
+        sort?: string | null
+        /** @description Include total count in response (expensive) */
+        include_total?: boolean
       }
       header?: never
       path?: never
