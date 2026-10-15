@@ -122,15 +122,43 @@ class ExecutionPlaneHttpClient:
         )
         return await self.submit_command(message)
 
-    async def list_work_items(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_work_items(
+        self,
+        *,
+        limit: int = 20,
+        cursor: str | None = None,
+        sort: str | None = None,
+        include_total: bool = False,
+    ) -> dict[str, Any]:
         """List a bounded page of work items for this AO client."""
-        response = await self._request("GET", "/v1/work-items", params={"limit": limit})
-        return self._as_list(response)
+        params: dict[str, str | int] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if sort is not None:
+            params["sort"] = sort
+        if include_total:
+            params["include_total"] = "true"
+        response = await self._request("GET", "/v1/work-items", params=params)
+        return self._as_page(response)
 
-    async def list_execution_targets(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_execution_targets(
+        self,
+        *,
+        limit: int = 20,
+        cursor: str | None = None,
+        sort: str | None = None,
+        include_total: bool = False,
+    ) -> dict[str, Any]:
         """List a bounded page of safe target metadata."""
-        response = await self._request("GET", "/v1/execution-targets", params={"limit": limit})
-        return self._as_list(response)
+        params: dict[str, str | int] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if sort is not None:
+            params["sort"] = sort
+        if include_total:
+            params["include_total"] = "true"
+        response = await self._request("GET", "/v1/execution-targets", params=params)
+        return self._as_page(response)
 
     async def get_cluster_binding(self, *, source_integration_id: UUID) -> dict[str, Any]:
         """Read the safe observed state of an integration binding from EP."""
@@ -192,5 +220,13 @@ class ExecutionPlaneHttpClient:
         """Require an array response for list endpoints."""
         if not isinstance(response, list):
             msg = "Execution Plane returned an invalid list response"
+            raise ExecutionPlaneRejectedError(msg)
+        return response
+
+    @staticmethod
+    def _as_page(response: dict[str, Any] | list[dict[str, Any]] | None) -> dict[str, Any]:
+        """Require a pagination envelope from list endpoints."""
+        if not isinstance(response, dict) or "resources" not in response:
+            msg = "Execution Plane returned an invalid page response"
             raise ExecutionPlaneRejectedError(msg)
         return response
