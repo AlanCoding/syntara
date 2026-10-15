@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 — Pydantic resolves model annotations at runtime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 from uuid import UUID  # noqa: TC003 — Pydantic resolves model annotations at runtime
 
 import structlog
@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from syntara.authz.dependencies import ProjectScopeFilter
 from syntara.authz.engine import AllowedProjectsResult  # noqa: TC001 — FastAPI resolves dependency annotations
+from syntara.core.models.base import BaseListParams  # noqa: TC001 — FastAPI resolves dependency annotations
 from syntara.core.syntara_router import SyntaraRouter
 from syntara.execution_plane.client import ExecutionPlaneHttpClient, ExecutionPlaneUnavailableError
 
@@ -93,32 +94,25 @@ class WorkItemFacadeRead(BaseModel):
 )
 async def list_execution_targets(
     allowed_projects: Annotated[AllowedProjectsResult, Depends(_target_scope)],
-    limit: int = Query(default=20, ge=1, le=100),
-    cursor: str | None = Query(default=None, max_length=1024),
+    params: Annotated[BaseListParams, Query()],
 ) -> ExecutionTargetListResponse:
     """Read registered execution targets from EP after AO permission checks."""
     try:
         async with ExecutionPlaneHttpClient() as client:
-            page = await _list_ep_resources(
+            items = await _list_ep_resources(
                 client,
                 operation="execution_targets",
                 allowed_projects=allowed_projects,
-                limit=limit,
-                cursor=cursor,
+                limit=params.limit,
             )
     except ExecutionPlaneUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Execution Plane unavailable",
         ) from exc
-    resources = [ExecutionTargetFacadeRead.model_validate(item) for item in page["resources"]]
+    resources = [ExecutionTargetFacadeRead.model_validate(item) for item in items]
     logger.info("Listed execution targets", count=len(resources))
-    return ExecutionTargetListResponse(
-        resources=resources,
-        next=page.get("next"),
-        prev=page.get("prev"),
-        total=page.get("total"),
-    )
+    return ExecutionTargetListResponse(resources=resources)
 
 
 @router.get(
@@ -129,32 +123,25 @@ async def list_execution_targets(
 )
 async def list_work_items(
     allowed_projects: Annotated[AllowedProjectsResult, Depends(_work_item_scope)],
-    limit: int = Query(default=20, ge=1, le=100),
-    cursor: str | None = Query(default=None, max_length=1024),
+    params: Annotated[BaseListParams, Query()],
 ) -> WorkItemListResponse:
     """Read work-item state from EP after AO permission checks."""
     try:
         async with ExecutionPlaneHttpClient() as client:
-            page = await _list_ep_resources(
+            items = await _list_ep_resources(
                 client,
                 operation="work_items",
                 allowed_projects=allowed_projects,
-                limit=limit,
-                cursor=cursor,
+                limit=params.limit,
             )
     except ExecutionPlaneUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Execution Plane unavailable",
         ) from exc
-    resources = [WorkItemFacadeRead.model_validate(item) for item in page["resources"]]
+    resources = [WorkItemFacadeRead.model_validate(item) for item in items]
     logger.info("Listed work items", count=len(resources))
-    return WorkItemListResponse(
-        resources=resources,
-        next=page.get("next"),
-        prev=page.get("prev"),
-        total=page.get("total"),
-    )
+    return WorkItemListResponse(resources=resources)
 
 
 async def _list_ep_resources(
@@ -163,11 +150,10 @@ async def _list_ep_resources(
     operation: Literal["execution_targets", "work_items"],
     allowed_projects: AllowedProjectsResult,
     limit: int,
-    cursor: str | None,
-) -> dict[str, Any]:
+) -> list[dict[str, object]]:
     """List EP resources after AO permission checks. EP has no project scope."""
     if not allowed_projects.all_projects and not allowed_projects.project_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No project-scoped access to EP resources")
     if operation == "work_items":
-        return await client.list_work_items(limit=limit, cursor=cursor)
-    return await client.list_execution_targets(limit=limit, cursor=cursor)
+        return await client.list_work_items(limit=limit)
+    return await client.list_execution_targets(limit=limit)

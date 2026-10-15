@@ -1,8 +1,10 @@
 """Integration tests for the AO Execution Plane facade pagination contract.
 
-Verifies that the AO facade correctly forwards query parameters to EP and
-passes through cursor-based pagination fields in the response.  EP HTTP
-calls are intercepted by respx; the AO database (postgres) is real.
+EP only supports ``limit`` and returns a bare JSON array; cursor, sort, and
+include_total are accepted by the AO query model (consistent with BaseListParams)
+but only ``limit`` is forwarded to EP.
+
+EP HTTP calls are intercepted by respx; the AO database (postgres) is real.
 """
 
 from __future__ import annotations
@@ -69,104 +71,86 @@ def _ep_settings(override_settings: Callable[..., AbstractContextManager[object]
 
 
 class TestExecutionTargetsPagination:
-    """Execution-target list endpoint forwards query params and exposes cursor fields."""
+    """Execution-target list endpoint uses BaseListParams and forwards limit to EP."""
 
     @pytest.mark.asyncio
-    async def test_first_page_returns_resources_and_next_cursor(
+    async def test_first_page_returns_resources(
         self,
         auth_client: AsyncClient,
     ) -> None:
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            ep.get("/v1/execution-targets").mock(
-                return_value=Response(
-                    200,
-                    json={
-                        "resources": [_TARGET_1],
-                        "next": "cursor_page2",
-                        "prev": None,
-                        "total": 2,
-                    },
-                )
-            )
+            ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[_TARGET_1, _TARGET_2]))
             resp = await auth_client.get(
                 "/api/execution_plane/v1/execution_targets",
-                params={"limit": 1},
+                params={"limit": 2},
             )
 
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body["resources"]) == 1
+        assert len(body["resources"]) == 2
         assert body["resources"][0]["name"] == "workers-1"
-        assert body["next"] == "cursor_page2"
-        assert body["prev"] is None
-        assert body["total"] == 2
+        assert body["resources"][1]["name"] == "workers-2"
+        assert "next" in body
+        assert "prev" in body
+        assert "total" in body
 
     @pytest.mark.asyncio
-    async def test_subsequent_page_forwards_cursor_to_ep(
+    async def test_limit_forwarded_to_ep(
         self,
         auth_client: AsyncClient,
     ) -> None:
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            route = ep.get("/v1/execution-targets").mock(
-                return_value=Response(
-                    200,
-                    json={
-                        "resources": [_TARGET_2],
-                        "next": None,
-                        "prev": "cursor_page1",
-                        "total": 2,
-                    },
-                )
+            route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[_TARGET_1]))
+            await auth_client.get(
+                "/api/execution_plane/v1/execution_targets",
+                params={"limit": 7},
             )
+
+        assert "limit=7" in str(route.calls.last.request.url)
+
+    @pytest.mark.asyncio
+    async def test_cursor_accepted_but_not_forwarded_to_ep(
+        self,
+        auth_client: AsyncClient,
+    ) -> None:
+        """Cursor is a valid query param (BaseListParams) but EP does not support it."""
+        with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+            route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[_TARGET_2]))
             resp = await auth_client.get(
                 "/api/execution_plane/v1/execution_targets",
-                params={"limit": 1, "cursor": "cursor_page2"},
+                params={"limit": 1, "cursor": "some_opaque_cursor"},
             )
 
         assert resp.status_code == 200
-        body = resp.json()
-        assert len(body["resources"]) == 1
-        assert body["resources"][0]["name"] == "workers-2"
-        assert body["next"] is None
-        assert body["prev"] == "cursor_page1"
-
-        forwarded = route.calls.last.request
-        assert "cursor=cursor_page2" in str(forwarded.url)
-        assert "limit=1" in str(forwarded.url)
+        assert "cursor" not in str(route.calls.last.request.url)
 
     @pytest.mark.asyncio
-    async def test_terminal_page_has_null_next(
+    async def test_sort_accepted(
         self,
         auth_client: AsyncClient,
     ) -> None:
         with respx.mock(base_url=_EP_BASE) as ep:
-            ep.get("/v1/execution-targets").mock(
-                return_value=Response(
-                    200,
-                    json={"resources": [_TARGET_2], "next": None, "prev": "cursor_prev", "total": 2},
-                )
+            ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[]))
+            resp = await auth_client.get(
+                "/api/execution_plane/v1/execution_targets",
+                params={"sort": "-created_at"},
             )
-            resp = await auth_client.get("/api/execution_plane/v1/execution_targets")
 
         assert resp.status_code == 200
-        assert resp.json()["next"] is None
 
     @pytest.mark.asyncio
-    async def test_legacy_list_response_from_ep_is_accepted(
+    async def test_include_total_accepted(
         self,
         auth_client: AsyncClient,
     ) -> None:
-        """EP returning a bare JSON array still works; pagination fields are null."""
         with respx.mock(base_url=_EP_BASE) as ep:
-            ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[_TARGET_1]))
-            resp = await auth_client.get("/api/execution_plane/v1/execution_targets")
+            ep.get("/v1/execution-targets").mock(return_value=Response(200, json=[]))
+            resp = await auth_client.get(
+                "/api/execution_plane/v1/execution_targets",
+                params={"include_total": "true"},
+            )
 
         assert resp.status_code == 200
-        body = resp.json()
-        assert len(body["resources"]) == 1
-        assert body["next"] is None
-        assert body["prev"] is None
-        assert body["total"] is None
 
     @pytest.mark.asyncio
     async def test_invalid_limit_too_low_returns_422(
@@ -191,53 +175,38 @@ class TestExecutionTargetsPagination:
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_cursor_too_long_returns_422(
+    async def test_invalid_sort_pattern_returns_422(
         self,
         auth_client: AsyncClient,
     ) -> None:
         resp = await auth_client.get(
             "/api/execution_plane/v1/execution_targets",
-            params={"cursor": "x" * 1025},
+            params={"sort": "INVALID SORT"},
         )
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_limit_forwarded_to_ep(
+    async def test_ep_unavailable_returns_503(
         self,
         auth_client: AsyncClient,
     ) -> None:
-        with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            route = ep.get("/v1/execution-targets").mock(
-                return_value=Response(200, json={"resources": [], "next": None, "prev": None, "total": 0})
-            )
-            await auth_client.get(
-                "/api/execution_plane/v1/execution_targets",
-                params={"limit": 7},
-            )
+        with respx.mock(base_url=_EP_BASE) as ep:
+            ep.get("/v1/execution-targets").mock(return_value=Response(503))
+            resp = await auth_client.get("/api/execution_plane/v1/execution_targets")
 
-        assert "limit=7" in str(route.calls.last.request.url)
+        assert resp.status_code == 503
 
 
 class TestWorkItemsPagination:
-    """Work-item list endpoint forwards query params and exposes cursor fields."""
+    """Work-item list endpoint uses BaseListParams and forwards limit to EP."""
 
     @pytest.mark.asyncio
-    async def test_first_page_returns_resources_and_next_cursor(
+    async def test_returns_resources(
         self,
         auth_client: AsyncClient,
     ) -> None:
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            ep.get("/v1/work-items").mock(
-                return_value=Response(
-                    200,
-                    json={
-                        "resources": [_WORK_ITEM_1],
-                        "next": "wi_cursor_page2",
-                        "prev": None,
-                        "total": 3,
-                    },
-                )
-            )
+            ep.get("/v1/work-items").mock(return_value=Response(200, json=[_WORK_ITEM_1]))
             resp = await auth_client.get(
                 "/api/execution_plane/v1/work_items",
                 params={"limit": 1},
@@ -246,29 +215,21 @@ class TestWorkItemsPagination:
         assert resp.status_code == 200
         body = resp.json()
         assert len(body["resources"]) == 1
-        assert body["next"] == "wi_cursor_page2"
-        assert body["prev"] is None
-        assert body["total"] == 3
+        assert body["resources"][0]["status"] == "completed"
 
     @pytest.mark.asyncio
-    async def test_cursor_forwarded_to_ep(
+    async def test_limit_forwarded_to_ep(
         self,
         auth_client: AsyncClient,
     ) -> None:
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
-            route = ep.get("/v1/work-items").mock(
-                return_value=Response(
-                    200,
-                    json={"resources": [], "next": None, "prev": "wi_cursor_page1", "total": 1},
-                )
-            )
+            route = ep.get("/v1/work-items").mock(return_value=Response(200, json=[]))
             await auth_client.get(
                 "/api/execution_plane/v1/work_items",
-                params={"limit": 1, "cursor": "wi_cursor_page2"},
+                params={"limit": 5},
             )
 
-        forwarded = route.calls.last.request
-        assert "cursor=wi_cursor_page2" in str(forwarded.url)
+        assert "limit=5" in str(route.calls.last.request.url)
 
     @pytest.mark.asyncio
     async def test_invalid_limit_returns_422(
