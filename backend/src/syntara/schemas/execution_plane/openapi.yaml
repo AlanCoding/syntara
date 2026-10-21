@@ -3,14 +3,14 @@ openapi: 3.1.0
 info:
   title: Execution Plane API
   description: Execution Plane operator endpoints — observe execution targets and work items.
-  version: 0.1.0
+  version: 0.2.0
 paths:
   /api/execution_plane/v1/execution_targets:
     get:
       tags:
         - Execution Plane
       summary: List execution targets
-      description: Retrieve registered execution targets.
+      description: Retrieve registered execution targets. Filters use field=value or field[operator]=value; labels[key]=value matches a label and an empty value tests key existence. EP validates fields and operators. Keep filters, sort, and limit unchanged when following opaque cursors.
       operationId: list_execution_targets
       security:
         - bearerAuth: []
@@ -56,6 +56,116 @@ paths:
             default: false
             title: Include Total
           description: Include total count in response (expensive)
+        - name: id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Target UUID; id[in]=uuid1,uuid2 for membership
+            title: Id
+          description: Target UUID; id[in]=uuid1,uuid2 for membership
+        - name: cluster_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Physical cluster UUID; supports eq and in
+            title: Cluster Id
+          description: Physical cluster UUID; supports eq and in
+        - name: name
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Name; supports eq, in, contains, and starts_with
+            title: Name
+          description: Name; supports eq, in, contains, and starts_with
+        - name: endpoint
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Endpoint; supports eq, in, contains, and starts_with
+            title: Endpoint
+          description: Endpoint; supports eq, in, contains, and starts_with
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Target status; supports eq and in
+            title: Status
+          description: Target status; supports eq and in
+        - name: backend_type
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Backend type; supports eq and in
+            title: Backend Type
+          description: Backend type; supports eq and in
+        - name: enabled
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Boolean; supports eq, in, and isnull
+            title: Enabled
+          description: Boolean; supports eq, in, and isnull
+        - name: is_default
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Boolean; supports eq, in, and isnull
+            title: Is Default
+          description: Boolean; supports eq, in, and isnull
+        - name: created_at
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Creation time; supports eq, in, gt, gte, lt, lte, and isnull
+            title: Created At
+          description: Creation time; supports eq, in, gt, gte, lt, lte, and isnull
+        - name: last_ran_at
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Last run time; supports ranges and isnull
+            title: Last Ran At
+          description: Last run time; supports ranges and isnull
+        - name: status_message
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Status message; supports text operators and isnull
+            title: Status Message
+          description: Status message; supports text operators and isnull
       responses:
         '200':
           description: Successful Response
@@ -63,6 +173,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExecutionTargetListResponse'
+        '502':
+          description: Invalid Execution Plane response
+        '503':
+          description: Execution Plane unavailable
         '422':
           description: Validation Error
           content:
@@ -77,7 +191,7 @@ paths:
       tags:
         - Execution Plane
       summary: List work items
-      description: Retrieve work items.
+      description: Retrieve work items. Filters use field=value or field[operator]=value; comma-separated values within one field/operator use OR and different fields/operators use AND. EP validates fields and operators. Keep filters, sort, and limit unchanged when following opaque cursors.
       operationId: list_work_items
       security:
         - bearerAuth: []
@@ -123,6 +237,76 @@ paths:
             default: false
             title: Include Total
           description: Include total count in response (expensive)
+        - name: id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Work UUID; id[in]=uuid1,uuid2 for membership
+            title: Id
+          description: Work UUID; id[in]=uuid1,uuid2 for membership
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Work status; supports eq and in
+            title: Status
+          description: Work status; supports eq and in
+        - name: created_at
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Creation time; supports eq, in, gt, gte, lt, lte, and isnull
+            title: Created At
+          description: Creation time; supports eq, in, gt, gte, lt, lte, and isnull
+        - name: claimed_at
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Claim time; supports ranges and isnull
+            title: Claimed At
+          description: Claim time; supports ranges and isnull
+        - name: completed_at
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Completion time; supports ranges and isnull
+            title: Completed At
+          description: Completion time; supports ranges and isnull
+        - name: resource_cleanup_status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Cleanup status; supports eq and in
+            title: Resource Cleanup Status
+          description: Cleanup status; supports eq and in
+        - name: resource_cleanup_error
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            description: Cleanup error; supports text operators and isnull
+            title: Resource Cleanup Error
+          description: Cleanup error; supports text operators and isnull
       responses:
         '200':
           description: Successful Response
@@ -130,6 +314,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkItemListResponse'
+        '502':
+          description: Invalid Execution Plane response
+        '503':
+          description: Execution Plane unavailable
         '422':
           description: Validation Error
           content:

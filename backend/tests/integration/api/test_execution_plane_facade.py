@@ -1,8 +1,7 @@
 """Integration tests for the AO Execution Plane facade pagination contract.
 
-EP only supports ``limit`` and returns a bare JSON array; cursor, sort, and
-include_total are accepted by the AO query model (consistent with BaseListParams)
-but only ``limit`` is forwarded to EP.
+Query controls, dynamic bracket filters, and opaque cursors are forwarded to EP.
+EP's response envelope and validation errors retain their public semantics.
 
 EP HTTP calls are intercepted by respx; the AO database (postgres) is real.
 """
@@ -71,14 +70,19 @@ def _ep_settings(override_settings: Callable[..., AbstractContextManager[object]
 
 
 class TestExecutionTargetsPagination:
-    """Execution-target list endpoint uses BaseListParams and forwards limit to EP."""
+    """Execution-target list endpoint forwards query controls and the EP page envelope."""
 
     @pytest.mark.asyncio
     async def test_first_page_returns_resources(
         self,
         auth_client: AsyncClient,
     ) -> None:
-        ep_page = {"resources": [_TARGET_1, _TARGET_2], "next": "eyJpZCI6Im5leHQifQ", "prev": None, "total": None}
+        ep_page: dict[str, Any] = {
+            "resources": [_TARGET_1, _TARGET_2],
+            "next": "eyJpZCI6Im5leHQifQ",
+            "prev": None,
+            "total": None,
+        }
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
             ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
@@ -100,7 +104,7 @@ class TestExecutionTargetsPagination:
         self,
         auth_client: AsyncClient,
     ) -> None:
-        ep_page = {"resources": [_TARGET_1], "next": None, "prev": None, "total": None}
+        ep_page: dict[str, Any] = {"resources": [_TARGET_1], "next": None, "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
             route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             await auth_client.get(
@@ -116,7 +120,7 @@ class TestExecutionTargetsPagination:
         auth_client: AsyncClient,
     ) -> None:
         """Cursor is forwarded to EP and EP's next/prev cursors are passed through."""
-        ep_page = {"resources": [_TARGET_2], "next": None, "prev": "eyJpZCI6InByZXYifQ", "total": None}
+        ep_page: dict[str, Any] = {"resources": [_TARGET_2], "next": None, "prev": "eyJpZCI6InByZXYifQ", "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
             route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
@@ -133,7 +137,7 @@ class TestExecutionTargetsPagination:
         self,
         auth_client: AsyncClient,
     ) -> None:
-        ep_page = {"resources": [], "next": None, "prev": None, "total": None}
+        ep_page: dict[str, Any] = {"resources": [], "next": None, "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE) as ep:
             route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
@@ -149,7 +153,7 @@ class TestExecutionTargetsPagination:
         self,
         auth_client: AsyncClient,
     ) -> None:
-        ep_page = {"resources": [], "next": None, "prev": None, "total": 42}
+        ep_page: dict[str, Any] = {"resources": [], "next": None, "prev": None, "total": 42}
         with respx.mock(base_url=_EP_BASE) as ep:
             route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
@@ -207,14 +211,14 @@ class TestExecutionTargetsPagination:
 
 
 class TestWorkItemsPagination:
-    """Work-item list endpoint uses BaseListParams and forwards limit to EP."""
+    """Work-item list endpoint forwards query controls and the EP page envelope."""
 
     @pytest.mark.asyncio
     async def test_returns_resources(
         self,
         auth_client: AsyncClient,
     ) -> None:
-        ep_page = {"resources": [_WORK_ITEM_1], "next": None, "prev": None, "total": None}
+        ep_page: dict[str, Any] = {"resources": [_WORK_ITEM_1], "next": None, "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
             ep.get("/v1/work-items").mock(return_value=Response(200, json=ep_page))
             resp = await auth_client.get(
@@ -233,7 +237,7 @@ class TestWorkItemsPagination:
         self,
         auth_client: AsyncClient,
     ) -> None:
-        ep_page = {"resources": [], "next": None, "prev": None, "total": None}
+        ep_page: dict[str, Any] = {"resources": [], "next": None, "prev": None, "total": None}
         with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
             route = ep.get("/v1/work-items").mock(return_value=Response(200, json=ep_page))
             await auth_client.get(
@@ -264,3 +268,127 @@ class TestWorkItemsPagination:
             resp = await auth_client.get("/api/execution_plane/v1/work_items")
 
         assert resp.status_code == 503
+
+
+LIST_ENDPOINTS = [
+    ("/api/execution_plane/v1/work_items", "/v1/work-items"),
+    ("/api/execution_plane/v1/execution_targets", "/v1/execution-targets"),
+]
+
+FORWARDED_QUERIES = [
+    {"id[in]": "aaaaaaaa-0000-4000-8000-000000000001,aaaaaaaa-0000-4000-8000-000000000002"},
+    {"status[in]": "pending,failed", "created_at[gte]": "2025-06-01T12:00:00+00:00"},
+    {"id[in]": ""},
+    {"sort": "-status", "limit": "2", "include_total": "true", "cursor": "opaque+/=cursor"},
+    {"unknown[operator]": "preserve-for-ep-validation"},
+]
+
+
+@pytest.mark.parametrize(("path", "ep_path"), LIST_ENDPOINTS, ids=[p for p, _ in LIST_ENDPOINTS])
+@pytest.mark.parametrize("query", FORWARDED_QUERIES, ids=[f"GET {q}" for q in FORWARDED_QUERIES])
+async def test_get_list_forwards_query_values_unchanged(
+    auth_client: AsyncClient,
+    path: str,
+    ep_path: str,
+    query: dict[str, str],
+) -> None:
+    ep_page: dict[str, Any] = {"resources": [], "next": "next+/=", "prev": "prev+/=", "total": 7}
+    with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+        route = ep.get(ep_path).mock(return_value=Response(200, json=ep_page))
+        response = await auth_client.get(path, params=query)
+    assert response.status_code == 200, response.text
+    forwarded = dict(route.calls.last.request.url.params)
+    assert forwarded == {"limit": "20", **query}
+    assert response.json() == ep_page
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"labels[env]": "", "labels[region]": "west"},
+        {"name[contains]": "worker", "enabled": "false", "is_default": "true"},
+        {"sort": "name", "cluster_id": "aaaaaaaa-0000-4000-8000-000000000001", "backend_type": "vanilla_k8s"},
+    ],
+    ids=lambda query: f"GET /execution_targets {query}",
+)
+async def test_get_targets_forwards_named_boolean_and_label_filters(
+    auth_client: AsyncClient,
+    query: dict[str, str],
+) -> None:
+    with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+        route = ep.get("/v1/execution-targets").mock(return_value=Response(200, json={"resources": []}))
+        response = await auth_client.get("/api/execution_plane/v1/execution_targets", params=query)
+    assert response.status_code == 200, response.text
+    assert dict(route.calls.last.request.url.params) == {"limit": "20", **query}
+
+
+@pytest.mark.parametrize(("path", "ep_path"), LIST_ENDPOINTS, ids=[p for p, _ in LIST_ENDPOINTS])
+async def test_get_list_omits_unspecified_sort_to_preserve_ep_default(
+    auth_client: AsyncClient, path: str, ep_path: str
+) -> None:
+    with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+        route = ep.get(ep_path).mock(return_value=Response(200, json={"resources": []}))
+        response = await auth_client.get(path)
+    assert response.status_code == 200, response.text
+    assert dict(route.calls.last.request.url.params) == {"limit": "20"}
+
+
+@pytest.mark.parametrize(("path", "ep_path"), LIST_ENDPOINTS, ids=[p for p, _ in LIST_ENDPOINTS])
+async def test_get_list_preserves_ep_422_validation_error(auth_client: AsyncClient, path: str, ep_path: str) -> None:
+    with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+        route = ep.get(ep_path).mock(return_value=Response(422, json={"detail": "Invalid field: id__in"}))
+        response = await auth_client.get(path, params={"id__in": "bad-id"})
+    assert response.status_code == 422, response.text
+    assert route.calls.last.request.url.params["id__in"] == "bad-id"
+    assert response.json()["detail"] == "Invalid field: id__in"
+
+
+@pytest.mark.parametrize(("path", "ep_path"), LIST_ENDPOINTS, ids=[p for p, _ in LIST_ENDPOINTS])
+@pytest.mark.parametrize("ep_status", [401, 403, 404], ids=lambda code: f"EP {code} -> AO 502")
+async def test_get_list_maps_service_rejection_to_bad_gateway(
+    auth_client: AsyncClient,
+    path: str,
+    ep_path: str,
+    ep_status: int,
+) -> None:
+    with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+        ep.get(ep_path).mock(return_value=Response(ep_status, json={"detail": "internal service error"}))
+        response = await auth_client.get(path)
+    assert response.status_code == 502, response.text
+    assert "internal service error" not in response.text
+
+
+INVALID_PAGES = [
+    [],
+    {},
+    {"resources": None},
+    {"resources": {}},
+    {"resources": [1]},
+    {"resources": [], "next": 1},
+    {"resources": [], "prev": []},
+    {"resources": [], "total": -1},
+    {"resources": [], "total": True},
+    {"resources": [{"id": "invalid-resource"}]},
+]
+
+
+@pytest.mark.parametrize(("path", "ep_path"), LIST_ENDPOINTS, ids=[p for p, _ in LIST_ENDPOINTS])
+@pytest.mark.parametrize("page", INVALID_PAGES, ids=lambda page: f"EP page={page!r} -> AO 502")
+async def test_get_list_rejects_malformed_upstream_page(
+    auth_client: AsyncClient,
+    path: str,
+    ep_path: str,
+    page: Any,  # noqa: ANN401 - deliberately malformed JSON values
+) -> None:
+    with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+        ep.get(ep_path).mock(return_value=Response(200, json=page))
+        response = await auth_client.get(path)
+    assert response.status_code == 502, response.text
+
+
+@pytest.mark.parametrize(("path", "ep_path"), LIST_ENDPOINTS, ids=[p for p, _ in LIST_ENDPOINTS])
+async def test_get_list_rejects_invalid_upstream_json(auth_client: AsyncClient, path: str, ep_path: str) -> None:
+    with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+        ep.get(ep_path).mock(return_value=Response(200, text="not-json"))
+        response = await auth_client.get(path)
+    assert response.status_code == 502, response.text

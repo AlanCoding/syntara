@@ -1,4 +1,9 @@
-"""Versioned HTTP client for the standalone Execution Plane service."""
+"""Versioned HTTP client for the standalone Execution Plane service.
+
+List requests mirror execution_plane.api.pagination and the filter controls in
+execution_plane.api.list_queries. EP owns filter/sort validation and cursor
+interpretation; this transport forwards their wire values unchanged.
+"""
 
 from __future__ import annotations
 
@@ -129,17 +134,12 @@ class ExecutionPlaneHttpClient:
         cursor: str | None = None,
         sort: str | None = None,
         include_total: bool = False,
+        filters: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """List a bounded page of work items for this AO client."""
-        params: dict[str, str | int] = {"limit": limit}
-        if cursor is not None:
-            params["cursor"] = cursor
-        if sort is not None:
-            params["sort"] = sort
-        if include_total:
-            params["include_total"] = "true"
-        response = await self._request("GET", "/v1/work-items", params=params)
-        return self._as_page(response)
+        return await self._list_resources(
+            "/v1/work-items", limit=limit, cursor=cursor, sort=sort, include_total=include_total, filters=filters
+        )
 
     async def list_execution_targets(
         self,
@@ -148,16 +148,41 @@ class ExecutionPlaneHttpClient:
         cursor: str | None = None,
         sort: str | None = None,
         include_total: bool = False,
+        filters: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """List a bounded page of safe target metadata."""
-        params: dict[str, str | int] = {"limit": limit}
+        return await self._list_resources(
+            "/v1/execution-targets", limit=limit, cursor=cursor, sort=sort, include_total=include_total, filters=filters
+        )
+
+    async def _list_resources(
+        self,
+        path: str,
+        *,
+        limit: int,
+        cursor: str | None,
+        sort: str | None,
+        include_total: bool,
+        filters: Mapping[str, str] | None,
+    ) -> dict[str, Any]:
+        """Forward EP's list controls and dynamic filters without interpreting cursors.
+
+        Mirrors execution_plane.api.list_queries.list_query_filters: separate
+        query controls from filters so filters cannot override those controls.
+        """
+        params: dict[str, str | int] = {
+            key: value
+            for key, value in (filters or {}).items()
+            if key not in {"limit", "cursor", "sort", "include_total"}
+        }
+        params["limit"] = limit
         if cursor is not None:
             params["cursor"] = cursor
         if sort is not None:
             params["sort"] = sort
         if include_total:
             params["include_total"] = "true"
-        response = await self._request("GET", "/v1/execution-targets", params=params)
+        response = await self._request("GET", path, params=params)
         return self._as_page(response)
 
     async def get_cluster_binding(self, *, source_integration_id: UUID) -> dict[str, Any]:
@@ -202,7 +227,11 @@ class ExecutionPlaneHttpClient:
             raise ExecutionPlaneUnavailableError from exc
         if response.status_code == HTTPStatus.NO_CONTENT:
             return None
-        body = response.json()
+        try:
+            body = response.json()
+        except ValueError as exc:
+            msg = "Execution Plane returned invalid JSON"
+            raise ExecutionPlaneRejectedError(msg) from exc
         if isinstance(body, list):
             return cast("list[dict[str, Any]]", body)
         return cast("dict[str, Any]", body)
@@ -218,7 +247,16 @@ class ExecutionPlaneHttpClient:
     @staticmethod
     def _as_page(response: dict[str, Any] | list[dict[str, Any]] | None) -> dict[str, Any]:
         """Require a pagination envelope from list endpoints."""
-        if not isinstance(response, dict) or "resources" not in response:
+        if not isinstance(response, dict) or not isinstance(response.get("resources"), list):
+            msg = "Execution Plane returned an invalid page response"
+            raise ExecutionPlaneRejectedError(msg)
+        resources = response["resources"]
+        total = response.get("total")
+        if (
+            any(not isinstance(resource, dict) for resource in resources)
+            or any(response.get(key) is not None and not isinstance(response[key], str) for key in ("next", "prev"))
+            or (total is not None and (type(total) is not int or total < 0))
+        ):
             msg = "Execution Plane returned an invalid page response"
             raise ExecutionPlaneRejectedError(msg)
         return response
