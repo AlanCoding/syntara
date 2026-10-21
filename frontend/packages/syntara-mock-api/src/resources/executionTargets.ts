@@ -64,6 +64,7 @@ export const executionTargets: ExecutionTargetFacadeRead[] = [
     labels: {
       region: 'us-west',
       env: 'prod',
+      integration_id: 'b1000000-0000-4000-8000-000000000001',
     },
     created_at: mockDate.daysAgo7,
     last_ran_at: mockDate.minutesAgo30,
@@ -91,5 +92,22 @@ export const executionTargets: ExecutionTargetFacadeRead[] = [
     created_at: mockDate.daysAgo2,
     last_ran_at: null,
   },
-  ...buildExtraTargets(23),
+  {
+    id: 'a1000000-0000-4000-8000-000000000003',
+    cluster_id: 'b1000000-0000-4000-8000-000000000003',
+    name: 'RHEL Edge Lab',
+    backend_type: 'rhel',
+    endpoint: 'https://edge.lab.example.com',
+    placement: {
+      type: 'rhel',
+    },
+    status: 'ready',
+    enabled: false,
+    is_default: false,
+    status_message: null,
+    labels: {},
+    created_at: mockDate.daysAgo2,
+    last_ran_at: null,
+  },
+  ...buildExtraTargets(22),
 ]

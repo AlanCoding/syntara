@@ -97,10 +97,12 @@ describe('breadcrumbBuilders', () => {
   it('uses page hierarchy only for execution target detail', () => {
     expect(breadcrumbsExecutionTargetDetail('Prod OpenShift West')).toEqual([
       { label: 'Execution Plane', href: AppRoute.ExecutionPlane.Root },
+      { label: 'Execution targets', href: AppRoute.ExecutionPlane.Root },
       { label: 'Prod OpenShift West' },
     ])
     expect(breadcrumbsExecutionTargetDetailEarlyShell()).toEqual([
       { label: 'Execution Plane', href: AppRoute.ExecutionPlane.Root },
+      { label: 'Execution targets', href: AppRoute.ExecutionPlane.Root },
       { label: 'Execution target details' },
     ])
   })

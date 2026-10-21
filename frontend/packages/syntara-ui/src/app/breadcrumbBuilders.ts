@@ -47,8 +47,13 @@ function crumbApprovals(): AppBreadcrumbItem {
   return { label: LABEL_APPROVALS, href: AppRoute.Approvals.Root }
 }
 
+/** Section label only — there is no separate Execution Plane hub page. */
 function crumbExecutionPlane(): AppBreadcrumbItem {
   return { label: LABEL_EXECUTION_PLANE, href: AppRoute.ExecutionPlane.Root }
+}
+
+function crumbExecutionTargetsList(): AppBreadcrumbItem {
+  return { label: 'Execution targets', href: AppRoute.ExecutionPlane.Root }
 }
 
 function projectDetailTabLabel(tab: string): string {
@@ -163,11 +168,11 @@ export function breadcrumbsApprovalsPage(currentLabel: string): AppBreadcrumbIte
 }
 
 export function breadcrumbsExecutionTargetDetail(targetName: string): AppBreadcrumbItem[] {
-  return [crumbExecutionPlane(), { label: targetName }]
+  return [crumbExecutionPlane(), crumbExecutionTargetsList(), { label: targetName }]
 }
 
 export function breadcrumbsExecutionTargetDetailEarlyShell(): AppBreadcrumbItem[] {
-  return [crumbExecutionPlane(), { label: 'Execution target details' }]
+  return [crumbExecutionPlane(), crumbExecutionTargetsList(), { label: 'Execution target details' }]
 }
 
 export function breadcrumbsUserFormLoading(currentLabel: string): AppBreadcrumbItem[] {
