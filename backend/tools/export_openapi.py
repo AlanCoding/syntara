@@ -144,7 +144,7 @@ def build_ep_spec_app() -> FastAPI:
     app = FastAPI(
         title="Execution Plane API",
         description="Execution Plane operator endpoints — observe execution targets and work items.",
-        version="0.1.0",
+        version="0.2.0",
     )
     app.include_router(ep_router)
     app.include_router(ep_completion_router)

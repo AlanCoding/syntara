@@ -13,7 +13,7 @@ export interface paths {
     }
     /**
      * List execution targets
-     * @description Retrieve registered execution targets.
+     * @description Retrieve registered execution targets. Filters use field=value or field[operator]=value; labels[key]=value matches a label and an empty value tests key existence. EP validates fields and operators. Keep filters, sort, and limit unchanged when following opaque cursors.
      */
     get: operations['list_execution_targets']
     put?: never
@@ -33,7 +33,7 @@ export interface paths {
     }
     /**
      * List work items
-     * @description Retrieve work items.
+     * @description Retrieve work items. Filters use field=value or field[operator]=value; comma-separated values within one field/operator use OR and different fields/operators use AND. EP validates fields and operators. Keep filters, sort, and limit unchanged when following opaque cursors.
      */
     get: operations['list_work_items']
     put?: never
@@ -325,7 +325,36 @@ export interface operations {
   list_execution_targets: {
     parameters: {
       query?: {
+        /** @description Maximum number of results per page */
         limit?: number
+        /** @description Pagination cursor from previous response */
+        cursor?: string | null
+        /** @description Sort parameter (e.g., 'name', '-created_at') */
+        sort?: string | null
+        /** @description Include total count in response (expensive) */
+        include_total?: boolean
+        /** @description Target UUID; id[in]=uuid1,uuid2 for membership */
+        id?: string | null
+        /** @description Physical cluster UUID; supports eq and in */
+        cluster_id?: string | null
+        /** @description Name; supports eq, in, contains, and starts_with */
+        name?: string | null
+        /** @description Endpoint; supports eq, in, contains, and starts_with */
+        endpoint?: string | null
+        /** @description Target status; supports eq and in */
+        status?: string | null
+        /** @description Backend type; supports eq and in */
+        backend_type?: string | null
+        /** @description Boolean; supports eq, in, and isnull */
+        enabled?: string | null
+        /** @description Boolean; supports eq, in, and isnull */
+        is_default?: string | null
+        /** @description Creation time; supports eq, in, gt, gte, lt, lte, and isnull */
+        created_at?: string | null
+        /** @description Last run time; supports ranges and isnull */
+        last_ran_at?: string | null
+        /** @description Status message; supports text operators and isnull */
+        status_message?: string | null
       }
       header?: never
       path?: never
@@ -351,12 +380,47 @@ export interface operations {
           'application/problem+json': components['schemas']['HTTPValidationError']
         }
       }
+      /** @description Invalid Execution Plane response */
+      502: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Execution Plane unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
     }
   }
   list_work_items: {
     parameters: {
       query?: {
+        /** @description Maximum number of results per page */
         limit?: number
+        /** @description Pagination cursor from previous response */
+        cursor?: string | null
+        /** @description Sort parameter (e.g., 'name', '-created_at') */
+        sort?: string | null
+        /** @description Include total count in response (expensive) */
+        include_total?: boolean
+        /** @description Work UUID; id[in]=uuid1,uuid2 for membership */
+        id?: string | null
+        /** @description Work status; supports eq and in */
+        status?: string | null
+        /** @description Creation time; supports eq, in, gt, gte, lt, lte, and isnull */
+        created_at?: string | null
+        /** @description Claim time; supports ranges and isnull */
+        claimed_at?: string | null
+        /** @description Completion time; supports ranges and isnull */
+        completed_at?: string | null
+        /** @description Cleanup status; supports eq and in */
+        resource_cleanup_status?: string | null
+        /** @description Cleanup error; supports text operators and isnull */
+        resource_cleanup_error?: string | null
       }
       header?: never
       path?: never
@@ -381,6 +445,20 @@ export interface operations {
         content: {
           'application/problem+json': components['schemas']['HTTPValidationError']
         }
+      }
+      /** @description Invalid Execution Plane response */
+      502: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Execution Plane unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
       }
     }
   }
