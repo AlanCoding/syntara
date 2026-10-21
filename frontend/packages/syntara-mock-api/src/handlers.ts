@@ -14,6 +14,7 @@ import {
   WorkflowVersionStatusEnum,
 } from '@syntara/contracts'
 import { credentials, credentialTypes, credentialWorkflows } from './resources/credentials'
+import { executionTargets } from './resources/executionTargets'
 import { integrations } from './resources/integrations'
 import { models } from './resources/models'
 import { workflows } from './resources/workflows'
@@ -423,6 +424,39 @@ export const handlers = [
   }),
 
   // ── Integrations ──────────────────────────────────────────────────────────
+
+  http.get('/api/execution_plane/v1/execution_targets', ({ request }) => {
+    const username = getUsernameFromRequest(request)
+    // Match backend role conventions: only admin/auditor have execution_target:read
+    // (project-admin / padmin are denied — same as can_i without a project grant).
+    if (username !== 'admin' && username !== 'auditor') {
+      return HttpResponse.json(
+        {
+          type: 'https://api.example.com/errors/forbidden',
+          title: 'Forbidden',
+          detail: 'Insufficient permissions for execution_target:read',
+          code: 'FORBIDDEN',
+          retryable: false,
+        },
+        { status: 403 }
+      )
+    }
+
+    const url = new URL(request.url)
+    const nameContains = url.searchParams.get('name[contains]')
+    const cursor = url.searchParams.get('cursor')
+    const parsedLimit = Number.parseInt(url.searchParams.get('limit') ?? '20', 10)
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20
+    const includeTotal = url.searchParams.get('include_total') === 'true'
+
+    let filtered = [...executionTargets]
+    if (nameContains) {
+      const lower = nameContains.toLowerCase()
+      filtered = filtered.filter((target) => target.name.toLowerCase().includes(lower))
+    }
+
+    return HttpResponse.json(paginate(filtered, cursor, limit, includeTotal))
+  }),
 
   http.get('/api/v1/integrations', ({ request }) => {
     const url = new URL(request.url)
