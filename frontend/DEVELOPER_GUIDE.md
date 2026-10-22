@@ -388,4 +388,4 @@ See [docs/zustand-architecture.md](docs/zustand-architecture.md) for the complet
 | Error handling                | [docs/error-handling.md](docs/error-handling.md)                                           |
 | Workflow loading & saving     | [docs/workflow-loading-saving.md](docs/workflow-loading-saving.md)                         |
 | Testing guide                 | [packages/syntara-ui/TESTING.md](packages/syntara-ui/TESTING.md)                           |
-| Contributing guidelines       | [CONTRIBUTING.md](CONTRIBUTING.md)                                                         |
+| Contributing guidelines       | [Frontend contributor guide](../docs/frontend-contributing.md)                             |

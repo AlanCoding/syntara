@@ -1,6 +1,6 @@
 ---
 # Frontend CI workflow with conditional E2E execution and cost-saving gates.
-# Manual E2E trigger documentation lives in frontend/CONTRIBUTING.md.
+# Manual E2E trigger documentation lives in docs/frontend-contributing.md.
 name: CI Frontend
 
 on:
