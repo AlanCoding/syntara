@@ -32,7 +32,6 @@ from syntara.workflows.workflow_engine.models.workflow_definition import (
     ExecutionTargetProfile,
     ScriptExecutorParameters,
 )
-from syntara.workflows.workflow_engine.utils.activity_execution_ids import activity_execution_id
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -130,7 +129,7 @@ async def _dispatch_to_ep(  # noqa: C901, PLR0915 - service handoff and Temporal
         msg = "Temporal activity context is missing workflow or run identity"
         raise ApplicationError(msg, type="ContextError", non_retryable=True)
 
-    work_item_id = activity_execution_id(execution_id, info.activity_id)
+    work_item_id = uuid.uuid5(execution_id, info.activity_id)
     selectors = _build_work_execute_selectors(execution_target_id)
 
     image = settings.node_container_images.get(_NODE_TYPE)

@@ -3,7 +3,7 @@
 from collections.abc import Generator
 from typing import ClassVar, Self
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import UUID, uuid5
 
 import pytest
 from execution_plane_client.protocol import MessageEnvelope, ResourceReference, TransportReceipt
@@ -12,19 +12,11 @@ from temporalio.exceptions import ApplicationError
 from syntara.core.config.base import get_settings
 from syntara.execution_plane.client import ExecutionPlaneRejectedError, ExecutionPlaneUnavailableError
 from syntara.workflows.workflow_engine.activities.ep import ep_dispatch_activity as activity_module
-from syntara.workflows.workflow_engine.utils.activity_execution_ids import activity_execution_id
 
 ACTIVITY_INFO_PATH = "syntara.workflows.workflow_engine.activities.ep.ep_dispatch_activity.activity.info"
 EXECUTION_ID = "00000000-0000-0000-0000-000000000010"
-WORK_ITEM_ID = activity_execution_id(UUID(EXECUTION_ID), "unit-activity")
+WORK_ITEM_ID = uuid5(UUID(EXECUTION_ID), "unit-activity")
 EXECUTION_TARGET_ID = UUID("00000000-0000-0000-0000-000000000030")
-
-
-def test_shared_uuid_scopes_activity_ids_to_execution() -> None:
-    execution_id = uuid4()
-    assert activity_execution_id(execution_id, "script") == activity_execution_id(execution_id, "script")
-    assert activity_execution_id(execution_id, "script") != activity_execution_id(uuid4(), "script")
-    assert activity_execution_id(execution_id, "script_iter_0") != activity_execution_id(execution_id, "script_iter_1")
 
 
 class _FakeEPClient:
