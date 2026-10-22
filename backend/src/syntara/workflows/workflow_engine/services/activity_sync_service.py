@@ -43,6 +43,7 @@ from syntara.workflows.workflow_engine.services.activity_sync_types import (
     SyntheticActivityStarted,
     SyntheticPartialOutput,
 )
+from syntara.workflows.workflow_engine.utils.activity_execution_ids import activity_execution_id
 
 PRE_RESOLVED_ACTIVITY_ID_PREFIX = "pre-resolved-"
 
@@ -681,6 +682,8 @@ class ActivitySyncService(
                         retry_count=0,
                         iteration=None,
                     )
+                    if node_type == NodeType.SCRIPT:
+                        new_activity.id = activity_execution_id(execution_id, activity_id)
                     new_activities.append(new_activity)
 
                 # Bulk insert all activities
