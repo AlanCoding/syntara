@@ -1,6 +1,5 @@
 import {
   Button,
-  DescriptionList,
   EmptyState,
   EmptyStateActions,
   EmptyStateBody,
@@ -21,10 +20,12 @@ import {
 } from '../../app/breadcrumbBuilders'
 import { executionPlaneClient } from '../../client'
 import { SynDetail } from '../../components/details/SynDetail'
+import { SynDetailList } from '../../components/details/SynDetailList'
 import { SynLabel } from '../../components/labels/SynLabel'
 import { SynPage, SynPageBody } from '../../components/layout/SynPage'
 import { SynPageHeader } from '../../components/layout/SynPageHeader'
 import { SynPanel } from '../../components/layout/SynPanel'
+import { SynPanelContentStack } from '../../components/layout/SynPanelContentStack'
 import { SynErrorState } from '../../components/states/SynErrorState'
 import { useQueryState } from '../../components/states/useQueryState'
 import { SynLink } from '../../components/SynLink'
@@ -32,7 +33,6 @@ import { SynPageTitle } from '../../components/SynPageTitle'
 import { detachPromise } from '../../utils/detachPromise'
 import { useDocLink } from '../../utils/docs/useDocLink'
 
-import styles from './ExecutionTargetDetail.module.css'
 import { getClusterIntegrationId, getExecutionNamespace } from './executionTargetDetailUtils'
 import { ExecutionTargetStatusLabel } from './ExecutionTargetStatusLabel'
 import { RoutingLabelsCell } from './RoutingLabelsCell'
@@ -70,38 +70,50 @@ function ExecutionTargetDetailsBody({ target }: Readonly<{ target: ExecutionTarg
   const namespace = getExecutionNamespace(target.placement)
 
   return (
-    <Stack hasGutter className={styles.content}>
+    <SynPanelContentStack hasGutter>
       <StackItem>
-        <Title headingLevel="h2" size="lg">
-          General
-        </Title>
-        <DescriptionList isHorizontal className={styles.sectionDetails}>
-          <SynDetail label="Name">{target.name}</SynDetail>
-          <SynDetail label="OpenShift Cluster">
-            <ClusterDetailValue target={target} />
-          </SynDetail>
-          <SynDetail label="Execution namespace">{namespace ?? '—'}</SynDetail>
-          <SynDetail label="State">
-            <SynLabel status={target.enabled ? 'success' : 'custom'}>
-              {target.enabled ? 'Enabled' : 'Disabled'}
-            </SynLabel>
-          </SynDetail>
-          <SynDetail label="Status">
-            <ExecutionTargetStatusLabel status={target.status} message={target.status_message} />
-          </SynDetail>
-        </DescriptionList>
+        <Stack hasGutter>
+          <StackItem>
+            <Title headingLevel="h2" size="lg">
+              General
+            </Title>
+          </StackItem>
+          <StackItem>
+            <SynDetailList isHorizontal>
+              <SynDetail label="Name">{target.name}</SynDetail>
+              <SynDetail label="OpenShift Cluster">
+                <ClusterDetailValue target={target} />
+              </SynDetail>
+              <SynDetail label="Execution namespace">{namespace ?? '—'}</SynDetail>
+              <SynDetail label="State">
+                <SynLabel status={target.enabled ? 'success' : 'custom'}>
+                  {target.enabled ? 'Enabled' : 'Disabled'}
+                </SynLabel>
+              </SynDetail>
+              <SynDetail label="Status">
+                <ExecutionTargetStatusLabel status={target.status} message={target.status_message} />
+              </SynDetail>
+            </SynDetailList>
+          </StackItem>
+        </Stack>
       </StackItem>
       <StackItem>
-        <Title headingLevel="h2" size="lg">
-          Routing
-        </Title>
-        <DescriptionList isHorizontal className={styles.sectionDetails}>
-          <SynDetail label="OpenShift Container Platform node selector">
-            <RoutingLabelsCell labels={target.labels} />
-          </SynDetail>
-        </DescriptionList>
+        <Stack hasGutter>
+          <StackItem>
+            <Title headingLevel="h2" size="lg">
+              Routing
+            </Title>
+          </StackItem>
+          <StackItem>
+            <SynDetailList isHorizontal>
+              <SynDetail label="OpenShift Container Platform node selector">
+                <RoutingLabelsCell labels={target.labels} />
+              </SynDetail>
+            </SynDetailList>
+          </StackItem>
+        </Stack>
       </StackItem>
-    </Stack>
+    </SynPanelContentStack>
   )
 }
 

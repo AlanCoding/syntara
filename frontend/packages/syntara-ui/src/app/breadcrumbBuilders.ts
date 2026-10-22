@@ -52,10 +52,6 @@ function crumbExecutionPlane(): AppBreadcrumbItem {
   return { label: LABEL_EXECUTION_PLANE, href: AppRoute.ExecutionPlane.Root }
 }
 
-function crumbExecutionTargetsList(): AppBreadcrumbItem {
-  return { label: 'Execution targets', href: AppRoute.ExecutionPlane.Root }
-}
-
 function projectDetailTabLabel(tab: string): string {
   if (tab === 'details') return 'Details'
   if (tab === 'workflows') return 'Workflows'
@@ -168,11 +164,11 @@ export function breadcrumbsApprovalsPage(currentLabel: string): AppBreadcrumbIte
 }
 
 export function breadcrumbsExecutionTargetDetail(targetName: string): AppBreadcrumbItem[] {
-  return [crumbExecutionPlane(), crumbExecutionTargetsList(), { label: targetName }]
+  return [crumbExecutionPlane(), { label: targetName }]
 }
 
 export function breadcrumbsExecutionTargetDetailEarlyShell(): AppBreadcrumbItem[] {
-  return [crumbExecutionPlane(), crumbExecutionTargetsList(), { label: 'Execution target details' }]
+  return [crumbExecutionPlane(), { label: 'Execution target details' }]
 }
 
 export function breadcrumbsUserFormLoading(currentLabel: string): AppBreadcrumbItem[] {
