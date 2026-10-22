@@ -106,7 +106,7 @@ function ExecutionTargetDetailsBody({ target }: Readonly<{ target: ExecutionTarg
           </StackItem>
           <StackItem>
             <SynDetailList isHorizontal>
-              <SynDetail label="OpenShift Container Platform node selector">
+              <SynDetail label="OpenShift node selector">
                 <RoutingLabelsCell labels={target.labels} />
               </SynDetail>
             </SynDetailList>

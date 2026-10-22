@@ -46,7 +46,7 @@ function ExecutionPlaneTableContent({
             Name
           </Th>
           <Th width={20} sort={getSortParams('cluster_id')}>
-            Cluster
+            OpenShift Cluster
           </Th>
           <Th width={15} sort={getSortParams('status')}>
             Status
