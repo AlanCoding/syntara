@@ -7,6 +7,7 @@ completion are doubles; row creation and callback lookups use PostgreSQL.
 from collections.abc import Generator
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
+from uuid import uuid5
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -18,7 +19,6 @@ from syntara.workflows.models.activity_execution import ActivityExecution, Activ
 from syntara.workflows.models.execution import Execution
 from syntara.workflows.workflow_engine.activities.ep import ep_dispatch_activity as dispatch
 from syntara.workflows.workflow_engine.services.activity_sync_service import ActivitySyncService
-from syntara.workflows.workflow_engine.utils.activity_execution_ids import activity_execution_id
 
 _NODE_ID = "test_activity"
 _DEFINITIONS = {
@@ -61,7 +61,7 @@ async def test_monitor_and_dispatch_share_identity_in_either_order(
         await dispatch._dispatch_to_ep({"language": "bash", "code": "echo ok"}, None, test_execution.id, None) is None
     )
     work_id = ep_submission.call_args.args[1].command_id
-    assert work_id == activity_execution_id(test_execution.id, _NODE_ID)
+    assert work_id == uuid5(test_execution.id, _NODE_ID)
 
     temporal = AsyncMock()
     result = {"output": {"stdout": "ok"}}
