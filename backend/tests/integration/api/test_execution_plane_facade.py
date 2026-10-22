@@ -275,6 +275,63 @@ LIST_ENDPOINTS = [
     ("/api/execution_plane/v1/execution_targets", "/v1/execution-targets"),
 ]
 
+
+@pytest.mark.parametrize(
+    ("resource_id", "ep_status", "ep_body", "expected_ids"),
+    [
+        pytest.param(
+            "7beaf7e4-0000-4000-8000-000000000099",
+            200,
+            {"resources": [], "next": None, "prev": None, "total": None},
+            [],
+            id="GET /execution_targets?id=missing-uuid&limit=1 -> 200 empty",
+        ),
+        pytest.param(
+            "abc123",
+            422,
+            {"detail": "badly formed hexadecimal UUID string"},
+            [],
+            id="GET /execution_targets?id=abc123&limit=1 -> 422",
+        ),
+        pytest.param(
+            _TARGET_2["id"],
+            200,
+            {"resources": [_TARGET_2], "next": None, "prev": None, "total": None},
+            [_TARGET_2["id"]],
+            id="GET /execution_targets?id=second-target-uuid&limit=1 -> matching target",
+        ),
+    ],
+)
+async def test_get_execution_targets_by_plain_id_with_limit_one(
+    auth_client: AsyncClient,
+    resource_id: str,
+    ep_status: int,
+    ep_body: dict[str, Any],
+    expected_ids: list[str],
+) -> None:
+    """Forward plain id with limit=1; preserve empty results, UUID errors, and matches.
+
+    PostgreSQL backs AO authentication. EP HTTP is mocked: this tests the facade
+    boundary, while EP's PostgreSQL tests cover actual database filtering.
+    """
+    query = {"id": resource_id, "limit": "1"}
+    with respx.mock(base_url=_EP_BASE, assert_all_called=True) as ep:
+        route = ep.get("/v1/execution-targets", params=query).mock(return_value=Response(ep_status, json=ep_body))
+        response = await auth_client.get("/api/execution_plane/v1/execution_targets", params=query)
+
+    assert route.call_count == 1
+    assert dict(route.calls.last.request.url.params) == query
+    assert response.status_code == ep_status, response.text
+    if ep_status == 422:
+        assert response.json()["detail"] == ep_body["detail"]
+    else:
+        body = response.json()
+        assert [target["id"] for target in body["resources"]] == expected_ids
+        assert body["next"] is None
+        assert body["prev"] is None
+        assert body["total"] is None
+
+
 FORWARDED_QUERIES = [
     {"id[in]": "aaaaaaaa-0000-4000-8000-000000000001,aaaaaaaa-0000-4000-8000-000000000002"},
     {"status[in]": "pending,failed", "created_at[gte]": "2025-06-01T12:00:00+00:00"},
