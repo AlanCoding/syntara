@@ -2,10 +2,53 @@
 openapi: 3.1.0
 info:
   title: Execution Plane API
-  description: Execution Plane operator endpoints — observe execution targets and work items.
-  version: 0.2.0
+  description: Execution Plane operator endpoints — manage execution targets and observe work items.
+  version: 0.3.0
 paths:
   /api/execution_plane/v1/execution_targets:
+    post:
+      tags:
+        - Execution Plane
+      summary: Create execution target
+      description: Create a Kubernetes target on the installed cluster through EP commands.
+      operationId: create_execution_target
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionTargetCreate'
+      responses:
+        '201':
+          description: Created execution target
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionTargetFacadeRead'
+          headers:
+            Location:
+              description: AO target detail path
+              schema:
+                type: string
+        '404':
+          description: Execution target or installed cluster not found
+        '409':
+          description: Cluster not ready or protected target lifecycle conflict
+        '502':
+          description: Invalid Execution Plane response
+        '503':
+          description: Execution Plane unavailable
+        '422':
+          description: Validation Error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-app-permission:
+        resource: execution_target
+        action: create
     get:
       tags:
         - Execution Plane
@@ -186,6 +229,133 @@ paths:
       x-app-permission:
         resource: execution_target
         action: read
+  /api/execution_plane/v1/execution_targets/{target_id}:
+    get:
+      tags:
+        - Execution Plane
+      summary: Get execution target
+      description: Read the authoritative EP target by its physical UUID.
+      operationId: get_execution_target
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: target_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Target Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionTargetFacadeRead'
+        '404':
+          description: Execution target or installed cluster not found
+        '409':
+          description: Cluster not ready or protected target lifecycle conflict
+        '502':
+          description: Invalid Execution Plane response
+        '503':
+          description: Execution Plane unavailable
+        '422':
+          description: Validation Error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-app-permission:
+        resource: execution_target
+        action: read
+    patch:
+      tags:
+        - Execution Plane
+      summary: Update execution target
+      description: Patch target placement, routing labels, name, or default selection through EP.
+      operationId: update_execution_target
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: target_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Target Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionTargetUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionTargetFacadeRead'
+        '404':
+          description: Execution target or installed cluster not found
+        '409':
+          description: Cluster not ready or protected target lifecycle conflict
+        '502':
+          description: Invalid Execution Plane response
+        '503':
+          description: Execution Plane unavailable
+        '422':
+          description: Validation Error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-app-permission:
+        resource: execution_target
+        action: update
+    delete:
+      tags:
+        - Execution Plane
+      summary: Delete execution target
+      description: Begin draining a target; promote another target before deleting the default.
+      operationId: delete_execution_target
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: target_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Target Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionTargetDeleteAccepted'
+        '404':
+          description: Execution target or installed cluster not found
+        '409':
+          description: Cluster not ready or protected target lifecycle conflict
+        '502':
+          description: Invalid Execution Plane response
+        '503':
+          description: Execution Plane unavailable
+        '422':
+          description: Validation Error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-app-permission:
+        resource: execution_target
+        action: delete
   /api/execution_plane/v1/work_items:
     get:
       tags:
@@ -431,6 +601,47 @@ components:
         - credential
       title: CredentialResolution
       description: The resolved credential value for one submitted command.
+    ExecutionTargetCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Name
+        placement:
+          $ref: '#/components/schemas/KubernetesTargetPlacement'
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+        is_default:
+          type: boolean
+          title: Is Default
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+        - name
+        - placement
+      title: ExecutionTargetCreate
+      description: A Kubernetes target on the single cluster provisioned at installation.
+    ExecutionTargetDeleteAccepted:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        accepted:
+          type: boolean
+          const: true
+          title: Accepted
+          default: true
+      type: object
+      required:
+        - id
+      title: ExecutionTargetDeleteAccepted
+      description: EP accepted deletion; draining and physical removal happen independently.
     ExecutionTargetFacadeRead:
       properties:
         id:
@@ -531,6 +742,29 @@ components:
         - resources
       title: ExecutionTargetListResponse
       description: Paginated list response for ExecutionTarget.
+    ExecutionTargetUpdate:
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Name
+        placement:
+          $ref: '#/components/schemas/KubernetesTargetPlacement'
+          title: Placement
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+        is_default:
+          type: boolean
+          title: Is Default
+      additionalProperties: false
+      type: object
+      minProperties: 1
+      title: ExecutionTargetUpdate
+      description: Patch mutable target fields. Placement requires a namespace; omitted selectors are retained.
     HTTPValidationError:
       properties:
         detail:
@@ -568,6 +802,35 @@ components:
         - namespace
       title: KubernetesPlacement
       description: Kubernetes scheduling metadata returned by the Execution Plane.
+    KubernetesTargetPlacement:
+      properties:
+        type:
+          type: string
+          const: kubernetes
+          title: Type
+          default: kubernetes
+        namespace:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+          title: Namespace
+        node_selectors:
+          items:
+            type: string
+          type: array
+          title: Node Selectors
+        tolerations:
+          items:
+            type: string
+          type: array
+          title: Tolerations
+      additionalProperties: false
+      type: object
+      required:
+        - namespace
+      title: KubernetesTargetPlacement
+      description: Validated Kubernetes placement for writes, using EP's shared command contract.
     MessageEnvelope:
       properties:
         message_id:
