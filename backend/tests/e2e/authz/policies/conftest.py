@@ -373,19 +373,31 @@ SYSTEM_SCOPED_REPRESENTATIVE: list[PolicyTestCase] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Execution-plane policy cases — system-wide read permissions from
-# syntara.api.execution_plane_router. These entries track policies only; HTTP
+# Execution-plane policy cases — system-wide permissions from
+# syntara.api.execution_plane_facade. These entries track policies only; HTTP
 # authorization tests are not yet wired to this list.
 # ---------------------------------------------------------------------------
 
 EXECUTION_PLANE_SCOPED_CASES: list[PolicyTestCase] = [
     PolicyTestCase(
         "execution_target:read:any",
-        description="GET /api/execution-plane/v1/execution-targets",
+        description="GET /api/execution_plane/v1/execution_targets",
+    ),
+    PolicyTestCase(
+        "execution_target:create:any",
+        description="POST /api/execution_plane/v1/execution_targets",
+    ),
+    PolicyTestCase(
+        "execution_target:update:any",
+        description="PATCH /api/execution_plane/v1/execution_targets/{target_id}",
+    ),
+    PolicyTestCase(
+        "execution_target:delete:any",
+        description="DELETE /api/execution_plane/v1/execution_targets/{target_id}",
     ),
     PolicyTestCase(
         "work_item:read:any",
-        description="GET /api/execution-plane/v1/work-items",
+        description="GET /api/execution_plane/v1/work_items",
     ),
 ]
 

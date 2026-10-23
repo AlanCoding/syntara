@@ -28,7 +28,11 @@ from syntara.core.tls.http_client import build_internal_http_client
 EP_CLIENT_ID = "syntara-orchestration"
 EP_AUDIENCE = "execution-plane"
 EP_TOKEN_LIFETIME_SECONDS = 300
-EP_SCOPES = "work.execute command.cancel cluster.register work-items:read execution-targets:read clusters:read"
+EP_SCOPES = (
+    "work.execute command.cancel cluster.register "
+    "execution_target.register execution_target.update execution_target.delete "
+    "work-items:read execution-targets:read clusters:read"
+)
 
 
 class ExecutionPlaneError(RuntimeError):
@@ -160,6 +164,16 @@ class ExecutionPlaneHttpClient:
             "/v1/execution-targets", limit=limit, cursor=cursor, sort=sort, include_total=include_total, filters=filters
         )
 
+    async def get_execution_target(self, *, target_id: UUID) -> dict[str, Any]:
+        """Read a caller-owned target without its management credentials."""
+        return self._as_object(await self._request("GET", f"/v1/execution-targets/{target_id}"))
+
+    async def list_cluster_bindings(self, *, limit: int = 2) -> dict[str, Any]:
+        """Read bounded client-owned inventory for the installed-cluster adapter."""
+        return await self._list_resources(
+            "/v1/clusters", limit=limit, cursor=None, sort=None, include_total=False, filters=None
+        )
+
     async def _list_resources(
         self,
         path: str,
@@ -249,7 +263,7 @@ class ExecutionPlaneHttpClient:
     @staticmethod
     def _as_object(response: dict[str, Any] | list[dict[str, Any]] | None) -> dict[str, Any]:
         """Require an object response for single-resource endpoints."""
-        if response is None or isinstance(response, list):
+        if not isinstance(response, dict):
             msg = "Execution Plane returned an invalid object response"
             raise ExecutionPlaneRejectedError(msg)
         return response
