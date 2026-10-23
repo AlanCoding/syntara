@@ -144,7 +144,7 @@ make lint
 Execution Plane is an independent service in the public
 [syntara-execution-plane repository](https://github.com/syntara-orchestration/syntara-execution-plane).
 AO installs the separate `execution-plane-client` contract library from the
-upstream `v0.1.0` Git tag declared in `pyproject.toml`. `uv.lock` records the resolved
+upstream `v0.1.4` Git tag declared in `pyproject.toml`. `uv.lock` records the resolved
 commit for reproducibility; `make install` fetches it automatically.
 `make sync-requirements` exports hashed packages to `requirements.txt` and pinned
 Git packages to `requirements-vcs.txt` for Hermeto's separate prefetch passes.
@@ -200,11 +200,14 @@ Create the kind cluster and its workload namespace and ServiceAccount from the
 
 ```bash
 cd ../syntara-execution-plane
-KIND_EXPERIMENTAL_PROVIDER=podman kind create cluster --name ep
-kubectl apply -f docs/feature-branch-assets/execution-plane-init.yaml
+kind create cluster --name ep
+kubectl config view --minify --raw \
+  -o jsonpath={.clusters[0].cluster.server}
+kubectl apply -f deploy/kubernetes/execution-target/rbac.yaml
 kubectl create token syntara-dispatcher -n execution-plane --duration=48h
 kubectl config view --minify --raw \
   -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d
+make image
 ```
 
 The `kubectl config view` server value is useful for host-side diagnostics, but
@@ -221,16 +224,18 @@ full stack:
 
 ```bash
 cd ../syntara
-make setup
+export EP_IMAGE='localhost/execution-plane:dev'
 export APP_INTEGRATION_URL_ALLOWED_HOSTS='["ep-control-plane", "mcp-server"]'
+make setup
 make -C backend run-all-kind
 ```
 
 `run-all-kind` applies `podman-compose.kind-demo.override.yml`. The override
-attaches both `syntara` (needed for Integration endpoint validation) and
-`execution-plane-worker` to the external `kind` network while retaining the
-normal project network for database and Temporal connectivity. Recreate the
-stack after changing the override or the Integration endpoint.
+attaches `syntara`, `temporal-worker`, `temporal-background-worker` (all needed
+for Integration endpoint validation), and `execution-plane-worker` to the
+external `kind` network while retaining the normal project network for database
+and Temporal connectivity. Recreate the stack after changing the override or
+the Integration endpoint.
 
 When registering the OpenShift Integration in Syntara, use:
 
@@ -265,7 +270,7 @@ source revision. Full desired state, including disabled deletion records, allows
 EP's ClusterBinding reconciler to handle creation, updates and deletion even
 when requests arrive out of order. Observed status comes from `/v1/clusters/{id}`.
 
-The existing `/api/execution_plane/v1/events` callback URL now accepts
+The `/api/execution_plane/v1/commands` callback URL accepts
 `work.execute.completed` command envelopes. AO verifies the EP certificate and
 participant identities, resolves the parent work UUID to its Temporal activity,
 and returns a matching `TransportReceipt`. No command history is persisted.
