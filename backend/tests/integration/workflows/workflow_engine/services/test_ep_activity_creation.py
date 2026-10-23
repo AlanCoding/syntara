@@ -92,6 +92,7 @@ async def test_monitor_and_dispatch_share_identity_in_either_order(
             await reader.exec(select(ActivityExecution).where(ActivityExecution.execution_id == test_execution.id))
         ).all()
         assert {row.activity_name for row in rows} == set(_DEFINITIONS)
+        assert all(row.id == uuid5(test_execution.id, row.temporal_activity_id) for row in rows)
         assert next(row.id for row in rows if row.activity_name == _NODE_ID) == work_id
     temporal.complete_async_activity.assert_awaited_with(
         temporal_workflow_id=test_execution.temporal_workflow_id, activity_id=_NODE_ID, result=result
