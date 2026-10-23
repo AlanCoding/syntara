@@ -668,6 +668,7 @@ class ActivitySyncService(
 
                     # V2 workflows: Create records for all node types (triggers, control, executors)
                     new_activity = ActivityExecution(
+                        id=uuid5(execution_id, activity_id),
                         execution_id=execution_id,
                         activity_name=activity_id,
                         node_type=node_type,
@@ -681,8 +682,6 @@ class ActivitySyncService(
                         retry_count=0,
                         iteration=None,
                     )
-                    if node_type == NodeType.SCRIPT:
-                        new_activity.id = uuid5(execution_id, activity_id)
                     new_activities.append(new_activity)
 
                 # Bulk insert all activities
