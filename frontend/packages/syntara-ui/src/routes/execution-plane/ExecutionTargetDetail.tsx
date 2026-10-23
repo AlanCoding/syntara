@@ -33,7 +33,6 @@ import { SynPageTitle } from '../../components/SynPageTitle'
 import { detachPromise } from '../../utils/detachPromise'
 import { useDocLink } from '../../utils/docs/useDocLink'
 
-import { getClusterIntegrationId, getExecutionNamespace } from './executionTargetDetailUtils'
 import { ExecutionTargetStatusLabel } from './ExecutionTargetStatusLabel'
 import { RoutingLabelsCell } from './RoutingLabelsCell'
 
@@ -52,7 +51,7 @@ function ExecutionTargetDetailEarlyShell({ children }: Readonly<{ children: Reac
 }
 
 function ClusterDetailValue({ target }: Readonly<{ target: ExecutionTarget }>) {
-  const integrationId = getClusterIntegrationId(target)
+  const integrationId = target.labels?.integration_id?.trim() || undefined
   const displayId = target.cluster_id || '—'
 
   if (!integrationId) {
@@ -67,7 +66,8 @@ function ClusterDetailValue({ target }: Readonly<{ target: ExecutionTarget }>) {
 }
 
 function ExecutionTargetDetailsBody({ target }: Readonly<{ target: ExecutionTarget }>) {
-  const namespace = getExecutionNamespace(target.placement)
+  const placement = target.placement
+  const namespace = placement?.type === 'kubernetes' && placement.namespace ? placement.namespace : null
 
   return (
     <SynPanelContentStack hasGutter>

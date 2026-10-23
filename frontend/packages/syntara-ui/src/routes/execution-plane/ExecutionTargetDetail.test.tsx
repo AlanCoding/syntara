@@ -40,14 +40,6 @@ vi.mock('@tanstack/react-router', async () => {
   }
 })
 
-vi.mock('wouter', () => ({
-  useLocation: () => ['/execution-plane/et-001', mockNavigate],
-}))
-
-vi.mock('../../hooks/routing/useLocation', () => ({
-  useLocation: () => '/execution-plane/et-001',
-}))
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: false },
@@ -126,7 +118,7 @@ describe('ExecutionTargetDetail', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
   })
 
-  it('links Cluster with cluster_id when integration_id label is absent', async () => {
+  it('shows Cluster as plain text when integration_id label is absent', async () => {
     mockFacadeQuery({
       data: {
         resources: [{ ...mockTarget, labels: { region: 'us-west' } }],
@@ -138,10 +130,8 @@ describe('ExecutionTargetDetail', () => {
 
     render(<ExecutionTargetDetail />, { wrapper })
 
-    expect(await screen.findByRole('link', { name: 'cl-001' })).toHaveAttribute(
-      'href',
-      '/configuration/integrations/cl-001'
-    )
+    expect(await screen.findByText('cl-001')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'cl-001' })).not.toBeInTheDocument()
   })
 
   it('shows em dash for execution namespace on RHEL placement', async () => {
