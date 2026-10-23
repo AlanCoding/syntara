@@ -37,6 +37,9 @@ spec:
       value: '{{revision}}'
     - name: pipeline-github-pr-number
       value: '{{pull_request_number}}'
+    # Pin aap-dev on ANSTRAT-1803's feature branch
+    - name: aap-dev-revision
+      value: AAP-90779-ep-from-source
   pipelineRef:
     params:
       - name: name
