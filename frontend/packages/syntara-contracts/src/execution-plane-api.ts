@@ -17,11 +17,43 @@ export interface paths {
      */
     get: operations['list_execution_targets']
     put?: never
-    post?: never
+    /**
+     * Create execution target
+     * @description Create a Kubernetes target on the installed cluster through EP commands.
+     */
+    post: operations['create_execution_target']
     delete?: never
     options?: never
     head?: never
     patch?: never
+    trace?: never
+  }
+  '/api/execution_plane/v1/execution_targets/{target_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get execution target
+     * @description Read the authoritative EP target by its physical UUID.
+     */
+    get: operations['get_execution_target']
+    put?: never
+    post?: never
+    /**
+     * Delete execution target
+     * @description Begin draining a target; promote another target before deleting the default.
+     */
+    delete: operations['delete_execution_target']
+    options?: never
+    head?: never
+    /**
+     * Update execution target
+     * @description Patch target placement, routing labels, name, or default selection through EP.
+     */
+    patch: operations['update_execution_target']
     trace?: never
   }
   '/api/execution_plane/v1/work_items': {
@@ -116,6 +148,41 @@ export interface components {
       credential: string
     }
     /**
+     * ExecutionTargetCreate
+     * @description A Kubernetes target on the single cluster provisioned at installation.
+     */
+    ExecutionTargetCreate: {
+      /** Name */
+      name: string
+      placement: components['schemas']['KubernetesTargetPlacement']
+      /** Labels */
+      labels?: {
+        [key: string]: string
+      }
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean
+    }
+    /**
+     * ExecutionTargetDeleteAccepted
+     * @description EP accepted deletion; draining and physical removal happen independently.
+     */
+    ExecutionTargetDeleteAccepted: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /**
+       * Accepted
+       * @default true
+       * @constant
+       */
+      accepted?: true
+    }
+    /**
      * ExecutionTargetFacadeRead
      * @description Safe target fields available to AO's authorized management API.
      */
@@ -172,6 +239,22 @@ export interface components {
       /** Total */
       total?: number | null
     }
+    /**
+     * ExecutionTargetUpdate
+     * @description Patch mutable target fields. Placement requires a namespace; omitted selectors are retained.
+     */
+    ExecutionTargetUpdate: {
+      /** Name */
+      name?: string
+      /** Placement */
+      placement?: components['schemas']['KubernetesTargetPlacement']
+      /** Labels */
+      labels?: {
+        [key: string]: string
+      }
+      /** Is Default */
+      is_default?: boolean
+    }
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
@@ -187,6 +270,24 @@ export interface components {
        * @enum {string}
        */
       type: 'kubernetes'
+      /** Namespace */
+      namespace: string
+      /** Node Selectors */
+      node_selectors?: string[]
+      /** Tolerations */
+      tolerations?: string[]
+    }
+    /**
+     * KubernetesTargetPlacement
+     * @description Validated Kubernetes placement for writes, using EP's shared command contract.
+     */
+    KubernetesTargetPlacement: {
+      /**
+       * Type
+       * @default kubernetes
+       * @constant
+       */
+      type?: 'kubernetes'
       /** Namespace */
       namespace: string
       /** Node Selectors */
@@ -383,6 +484,250 @@ export interface operations {
         content: {
           'application/json': components['schemas']['ExecutionTargetListResponse']
         }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/problem+json': components['schemas']['HTTPValidationError']
+        }
+      }
+      /** @description Invalid Execution Plane response */
+      502: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Execution Plane unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+    }
+  }
+  create_execution_target: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExecutionTargetCreate']
+      }
+    }
+    responses: {
+      /** @description Created execution target */
+      201: {
+        headers: {
+          /** @description AO target detail path */
+          Location?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutionTargetFacadeRead']
+        }
+      }
+      /** @description Execution target or installed cluster not found */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Cluster not ready or protected target lifecycle conflict */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/problem+json': components['schemas']['HTTPValidationError']
+        }
+      }
+      /** @description Invalid Execution Plane response */
+      502: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Execution Plane unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+    }
+  }
+  get_execution_target: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        target_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutionTargetFacadeRead']
+        }
+      }
+      /** @description Execution target or installed cluster not found */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Cluster not ready or protected target lifecycle conflict */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/problem+json': components['schemas']['HTTPValidationError']
+        }
+      }
+      /** @description Invalid Execution Plane response */
+      502: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Execution Plane unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+    }
+  }
+  delete_execution_target: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        target_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutionTargetDeleteAccepted']
+        }
+      }
+      /** @description Execution target or installed cluster not found */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Cluster not ready or protected target lifecycle conflict */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/problem+json': components['schemas']['HTTPValidationError']
+        }
+      }
+      /** @description Invalid Execution Plane response */
+      502: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Execution Plane unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+    }
+  }
+  update_execution_target: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        target_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExecutionTargetUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutionTargetFacadeRead']
+        }
+      }
+      /** @description Execution target or installed cluster not found */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Cluster not ready or protected target lifecycle conflict */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
       }
       /** @description Validation Error */
       422: {

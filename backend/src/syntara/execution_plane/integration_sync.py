@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 import structlog
-from execution_plane_client.commands.clusters import ClusterRegister
+from execution_plane_client.commands.clusters import ClusterDelete, ClusterRegister
 from sqlalchemy import or_
 from sqlmodel import col, select
 
@@ -30,12 +29,14 @@ from syntara.integrations.models.integration import (
 )
 from syntara.integrations.models.integration_configuration import OpenShiftConfiguration
 
+if TYPE_CHECKING:
+    from uuid import UUID
+
 logger = structlog.stdlib.get_logger(__name__)
 
 POLL_SECONDS = 5
 LEASE_SECONDS = 60
 MAX_RETRY_SECONDS = 300
-EMPTY_CREDENTIAL_REF = UUID(int=0)
 
 
 async def _claim_outbox() -> list[ExecutionPlaneIntegrationSync]:
@@ -103,15 +104,7 @@ async def _desired_payload(row: ExecutionPlaneIntegrationSync) -> dict[str, Any]
                 "enabled": integration.enabled,
             }
 
-        return {
-            "name": row.name,
-            "endpoint": row.endpoint,
-            "namespace": row.namespace,
-            "credential_ref": EMPTY_CREDENTIAL_REF,
-            "project_ids": [],
-            "labels": {"integration_id": str(row.integration_id)},
-            "enabled": False,
-        }
+        return None
 
 
 async def _mark_outbox(
@@ -143,17 +136,16 @@ async def _mark_outbox(
 async def _deliver(row: ExecutionPlaneIntegrationSync) -> None:
     """Send one current desired state; stale outbox revisions are safely discarded."""
     try:
-        payload = await _desired_payload(row)
-        if payload is None:
-            await _mark_outbox(row.id, delivered=True)
-            return
-        # Register replaces the complete desired state, including disabled tombstones.
-        # A deletion can arrive before creation, so it must also create the binding.
-        message = ClusterRegister(
-            resource_key=row.integration_id,
-            desired_revision=row.source_revision,
-            **payload,
-        ).to_message(
+        command: ClusterRegister | ClusterDelete
+        if row.operation == "delete":
+            command = ClusterDelete(resource_key=row.integration_id, desired_revision=row.source_revision)
+        else:
+            payload = await _desired_payload(row)
+            if payload is None:
+                await _mark_outbox(row.id, delivered=True)
+                return
+            command = ClusterRegister(resource_key=row.integration_id, desired_revision=row.source_revision, **payload)
+        message = command.to_message(
             source_id=EP_CLIENT_ID,
             destination_id=EP_AUDIENCE,
             client_id=EP_CLIENT_ID,
@@ -214,6 +206,7 @@ async def _reconcile_observed_status() -> None:
             raw_status = state.get("status")
             status_map = {
                 "ready": ExecutionPlaneSyncStatus.READY,
+                "disabled": ExecutionPlaneSyncStatus.READY,
                 "error": ExecutionPlaneSyncStatus.ERROR,
                 "deleting": ExecutionPlaneSyncStatus.DELETING,
                 "deleted": ExecutionPlaneSyncStatus.DELETING,

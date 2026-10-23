@@ -1,4 +1,4 @@
-"""Execution Plane read proxy following EP's pagination/filtering wire contract.
+"""Execution Plane target CRUD and resource reads through the AO API boundary.
 
 Query controls mirror syntara.core.models.base.query_params.BaseListParams.
 Documented filters correspond to execution_plane.models.work_item.WorkItem and
@@ -41,15 +41,16 @@ the existing facade authorization checks and adds no project associations.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime  # noqa: TC003 — Pydantic resolves model annotations at runtime
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from uuid import UUID  # noqa: TC003 — Pydantic resolves model annotations at runtime
 
 import structlog
-from fastapi import Depends, HTTPException, Query, Request, status
+from fastapi import Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, ValidationError
 
-from syntara.authz.dependencies import ProjectScopeFilter
+from syntara.authz.dependencies import PermissionChecker, ProjectScopeFilter
 from syntara.authz.engine import AllowedProjectsResult  # noqa: TC001 — FastAPI resolves dependency annotations
 from syntara.core.models.base import BaseListParams
 from syntara.core.syntara_router import SyntaraRouter
@@ -58,6 +59,17 @@ from syntara.execution_plane.client import (
     ExecutionPlaneRejectedError,
     ExecutionPlaneUnavailableError,
 )
+from syntara.execution_plane.targets import (
+    ExecutionTargetCreate,
+    ExecutionTargetDeleteAccepted,
+    ExecutionTargetUpdate,
+    create_target,
+    delete_target,
+    update_target,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -65,6 +77,12 @@ router = SyntaraRouter(prefix="/api/execution_plane/v1", tags=["Execution Plane"
 
 _target_scope = ProjectScopeFilter("execution_target", "read")
 _work_item_scope = ProjectScopeFilter("work_item", "read")
+_TARGET_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"description": "Execution target or installed cluster not found"},
+    409: {"description": "Cluster not ready or protected target lifecycle conflict"},
+    502: {"description": "Invalid Execution Plane response"},
+    503: {"description": "Execution Plane unavailable"},
+}
 
 
 class ExecutionTargetListParams(BaseListParams):
@@ -165,6 +183,89 @@ class WorkItemFacadeRead(BaseModel):
     created_at: datetime
     claimed_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+@asynccontextmanager
+async def _target_client() -> AsyncIterator[ExecutionPlaneHttpClient]:
+    """Translate domain failures while keeping service-auth failures private."""
+    try:
+        async with ExecutionPlaneHttpClient() as client:
+            yield client
+    except ExecutionPlaneUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Execution Plane unavailable") from exc
+    except ExecutionPlaneRejectedError as exc:
+        if exc.status_code in {404, 409, 422}:
+            raise HTTPException(exc.status_code, exc.detail or str(exc)) from exc
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Invalid Execution Plane response") from exc
+    except (ValidationError, KeyError, TypeError) as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Invalid Execution Plane response") from exc
+
+
+@router.post(
+    "/execution_targets",
+    operation_id="create_execution_target",
+    summary="Create execution target",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        **_TARGET_RESPONSES,
+        201: {
+            "description": "Created execution target",
+            "headers": {"Location": {"description": "AO target detail path", "schema": {"type": "string"}}},
+        },
+    },
+    dependencies=[Depends(PermissionChecker("execution_target", "create"))],
+)
+async def create_execution_target(data: ExecutionTargetCreate, response: Response) -> ExecutionTargetFacadeRead:
+    """Create a Kubernetes target on the installed cluster through EP commands."""
+    async with _target_client() as client:
+        target_data = await create_target(client, data)
+        target = ExecutionTargetFacadeRead.model_validate(target_data)
+    response.headers["Location"] = f"/api/execution_plane/v1/execution_targets/{target.id}"
+    return target
+
+
+@router.get(
+    "/execution_targets/{target_id}",
+    operation_id="get_execution_target",
+    summary="Get execution target",
+    responses=_TARGET_RESPONSES,
+    dependencies=[Depends(PermissionChecker("execution_target", "read", resource_id_param="target_id"))],
+)
+async def get_execution_target(target_id: UUID) -> ExecutionTargetFacadeRead:
+    """Read the authoritative EP target by its physical UUID."""
+    async with _target_client() as client:
+        target = ExecutionTargetFacadeRead.model_validate(await client.get_execution_target(target_id=target_id))
+        if target.id != target_id:
+            raise ExecutionPlaneRejectedError
+        return target
+
+
+@router.patch(
+    "/execution_targets/{target_id}",
+    operation_id="update_execution_target",
+    summary="Update execution target",
+    responses=_TARGET_RESPONSES,
+    dependencies=[Depends(PermissionChecker("execution_target", "update", resource_id_param="target_id"))],
+)
+async def update_execution_target(target_id: UUID, data: ExecutionTargetUpdate) -> ExecutionTargetFacadeRead:
+    """Patch target placement, routing labels, name, or default selection through EP."""
+    async with _target_client() as client:
+        return ExecutionTargetFacadeRead.model_validate(await update_target(client, target_id, data))
+
+
+@router.delete(
+    "/execution_targets/{target_id}",
+    operation_id="delete_execution_target",
+    summary="Delete execution target",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_TARGET_RESPONSES,
+    dependencies=[Depends(PermissionChecker("execution_target", "delete", resource_id_param="target_id"))],
+)
+async def delete_execution_target(target_id: UUID) -> ExecutionTargetDeleteAccepted:
+    """Begin draining a target; promote another target before deleting the default."""
+    async with _target_client() as client:
+        await delete_target(client, target_id)
+    return ExecutionTargetDeleteAccepted(id=target_id)
 
 
 @router.get(

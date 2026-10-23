@@ -11,6 +11,32 @@ For the first deployment, AO and EP may use the existing PostgreSQL server, but
 EP uses a distinct database with EP-owned runtime and migration roles. Neither
 service's runtime role can connect to the other service database.
 
+## Execution-target API
+
+AO exposes `/api/execution_plane/v1`; target resources are EP `ExecutionTarget` records.
+
+| Method and path | Success |
+| --- | --- |
+| `GET /execution_targets` | 200 cursor page |
+| `GET /execution_targets/{target_id}` | 200 target |
+| `POST /execution_targets` | 201 target with `Location` |
+| `PATCH /execution_targets/{target_id}` | 200 target |
+| `DELETE /execution_targets/{target_id}` | 202 `{id, accepted: true}` |
+
+`POST` and `PATCH` accept `name`, `placement`, `labels`, and `is_default`, mapped
+to the corresponding EP `ExecutionTarget` fields. AO supplies `cluster_id` and
+`endpoint` from the installed cluster and sets `backend_type="vanilla_k8s"` on create.
+The current placement type is `KubernetesPlacement`, with `namespace`,
+`node_selectors`, and `tolerations`. `POST` requires `name` and `placement.namespace`;
+a `PATCH` containing `placement` also requires `placement.namespace`.
+`PATCH` leaves omitted fields unchanged. Supplied `labels` replace user labels;
+`labels: {}` clears them. Empty `node_selectors` or `tolerations` lists clear those lists.
+`is_default=true` promotes the target. Deleting or demoting the current default
+returns 409 until another target is promoted.
+Disabling an integration preserves its EP cluster and targets. Target configuration
+can still be changed while the cluster is disabled; each target retains its own enabled flag.
+See [read-query semantics](read-query-contract.md) and the generated EP OpenAPI for field schemas.
+
 ## Work and completion
 
 AO validates a script node, selects its digest-pinned image, persists an

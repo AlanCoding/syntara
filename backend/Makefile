@@ -360,7 +360,7 @@ ep-api-run: check-deps _ensure-secrets ## Run the standalone Execution Plane API
 		EP_API_TLS_CERT_PATH="$(abspath .secrets/certs/execution-plane.crt)" \
 		EP_API_TLS_KEY_PATH="$(abspath .secrets/certs/execution-plane.key)" \
 		EP_API_TLS_CLIENT_CA_PATH="$(abspath .secrets/certs/ca.pem)" \
-		uv run python -m execution_plane.api.main
+		uv run execution-plane-api
 
 ep-worker-run: check-deps _ensure-secrets _ensure-certs ## Run the standalone Execution Plane worker in the foreground
 	@echo "🔄 Starting Execution Plane worker..."

@@ -12,13 +12,13 @@ from syntara.execution_plane.integration_sync_model import ExecutionPlaneIntegra
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("enabled", [True, False])
-async def test_outbox_delivers_stable_command_and_retains_disabled_tombstone(monkeypatch, enabled):
+@pytest.mark.parametrize(("operation", "enabled"), [("upsert", True), ("upsert", False), ("delete", False)])
+async def test_outbox_distinguishes_disablement_from_deletion(monkeypatch, operation, enabled):
     now = datetime.now(UTC)
     row = ExecutionPlaneIntegrationSync(
         integration_id=uuid4(),
         source_revision=3,
-        operation="upsert" if enabled else "delete",
+        operation=operation,
         name="workers",
         endpoint="https://cluster.example",
         namespace="ep-workers",
@@ -34,7 +34,8 @@ async def test_outbox_delivers_stable_command_and_retains_disabled_tombstone(mon
         "labels": {},
         "enabled": enabled,
     }
-    monkeypatch.setattr(integration_sync, "_desired_payload", AsyncMock(return_value=payload))
+    resolve_payload = AsyncMock(return_value=payload)
+    monkeypatch.setattr(integration_sync, "_desired_payload", resolve_payload)
     mark = AsyncMock()
     monkeypatch.setattr(integration_sync, "_mark_outbox", mark)
     transport = AsyncMock()
@@ -51,11 +52,15 @@ async def test_outbox_delivers_stable_command_and_retains_disabled_tombstone(mon
     CommandCatalog().validate(message)
     assert message.command_id == row.id
     assert message.command.occurred_at == now
-    assert message.command.command_type == "cluster.register"
+    assert message.command.command_type == ("cluster.delete" if operation == "delete" else "cluster.register")
     assert message.command.payload["resource_key"] == str(row.integration_id)
     assert message.command.payload["desired_revision"] == 3
-    assert message.command.payload["enabled"] is enabled
-    assert message.command.payload["namespace"] == "ep-workers"
+    if operation == "delete":
+        assert set(message.command.payload) == {"resource_key", "desired_revision"}
+        resolve_payload.assert_not_awaited()
+    else:
+        assert message.command.payload["enabled"] is enabled
+        assert message.command.payload["namespace"] == "ep-workers"
     assert "insecure_skip_tls_verify" not in message.command.payload
     mark.assert_awaited_with(row.id, delivered=True)
 
