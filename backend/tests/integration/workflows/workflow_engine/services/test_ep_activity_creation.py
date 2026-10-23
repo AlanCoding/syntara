@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from syntara.execution_plane.bridge import _complete_activity
+from syntara.execution_plane.commands.completion import CompletionCommandHandler
+from syntara.execution_plane.commands.context import AOCommandContext
 from syntara.workflows.models.activity_execution import ActivityExecution, ActivityStatus
 from syntara.workflows.models.execution import Execution
 from syntara.workflows.workflow_engine.activities.ep import ep_dispatch_activity as dispatch
@@ -71,8 +72,8 @@ async def test_monitor_and_dispatch_share_identity_in_either_order(
                 await reader.exec(select(ActivityExecution).where(ActivityExecution.execution_id == test_execution.id))
             ).all() == []
         assert (
-            await _complete_activity(
-                session=reader, temporal_service=temporal, work_id=work_id, status="completed", result=result
+            await CompletionCommandHandler()._complete_activity(
+                context=AOCommandContext(reader, temporal), work_id=work_id, status="completed", result=result
             )
             is monitor_first
         )
@@ -82,8 +83,8 @@ async def test_monitor_and_dispatch_share_identity_in_either_order(
     await monitor._create_all_activities_upfront(test_execution.id, _DEFINITIONS)
     async with test_db_session_factory() as reader:
         assert (
-            await _complete_activity(
-                session=reader, temporal_service=temporal, work_id=work_id, status="completed", result=result
+            await CompletionCommandHandler()._complete_activity(
+                context=AOCommandContext(reader, temporal), work_id=work_id, status="completed", result=result
             )
             is True
         )
