@@ -76,8 +76,11 @@ spec:
       value: AAP-90779-ep-from-source
     # Execution Plane server revision; keep in sync with the
     # execution-plane-client protocol the syntara branch under test pins.
+    # Pinned to the concurrent-dispatch branch until that lands on EP devel:
+    # the worker otherwise dispatches work items serially, making every
+    # multi-script e2e workflow marginal against its original poll budget.
     - name: ep-revision
-      value: devel
+      value: goneri/concurrent-dispatch
   taskRunTemplate:
     serviceAccountName: konflux-integration-runner
   pipelineSpec:

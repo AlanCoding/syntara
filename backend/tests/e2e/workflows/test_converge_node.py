@@ -134,7 +134,6 @@ def test_converge_any_2_of_3_strategy(syntara_api: SyntaraApiRegistry):
                 {"from": "converge_node", "to": "final_action"},
             ],
         },
-        timeout=120,
     )
 
     assert result.status == ExecutionStatus.COMPLETED_WITH_ERRORS
@@ -151,8 +150,8 @@ def test_converge_any_2_of_3_strategy(syntara_api: SyntaraApiRegistry):
 def test_converge_timeout_continue_on_failure(syntara_api: SyntaraApiRegistry):
     """Test converge timeout with continue_on_failure=true.
 
-    The slow branch (sleep 30) feeds through slow_intermediate before
-    reaching converge. The fast branch connects directly. When the 15s
+    The slow branch (sleep 15) feeds through slow_intermediate before
+    reaching converge. The fast branch connects directly. When the 8s
     timeout fires, slow_intermediate has not been scheduled yet (slow_branch
     is still in-flight), so it is skipped. With continue_on_failure=true
     the converge is marked as failed but downstream continues.
@@ -180,7 +179,7 @@ def test_converge_timeout_continue_on_failure(syntara_api: SyntaraApiRegistry):
                     "id": "slow_branch",
                     "name": "Slow Branch",
                     "type": "script",
-                    "parameters": {"language": "bash", "code": 'sleep 30 && echo "Slow branch done"'},
+                    "parameters": {"language": "bash", "code": 'sleep 15 && echo "Slow branch done"'},
                 },
                 {
                     "id": "slow_intermediate",
@@ -192,7 +191,7 @@ def test_converge_timeout_continue_on_failure(syntara_api: SyntaraApiRegistry):
                     "id": "converge_node",
                     "name": "Converge with timeout",
                     "type": "converge",
-                    "parameters": {"wait_duration": 15},
+                    "parameters": {"wait_duration": 8},
                     "settings": {"continue_on_failure": True},
                 },
                 {
@@ -211,7 +210,7 @@ def test_converge_timeout_continue_on_failure(syntara_api: SyntaraApiRegistry):
                 {"from": "converge_node", "to": "final_action"},
             ],
         },
-        timeout=120,
+        timeout=30,
     )
 
     activities = {a.activity_id: a for a in (result.activities or [])}
@@ -288,7 +287,6 @@ def test_converge_all_strategy(syntara_api: SyntaraApiRegistry):
                 {"from": "converge_node", "to": "final_action"},
             ],
         },
-        timeout=120,
     )
 
     assert result.status == ExecutionStatus.COMPLETED, f"Failed: {result.error_details}"
@@ -342,7 +340,7 @@ def test_converge_timeout_fail_and_skip_downstream(syntara_api: SyntaraApiRegist
                     "id": "slow_branch",
                     "name": "Slow Branch",
                     "type": "script",
-                    "parameters": {"language": "bash", "code": 'sleep 30 && echo "Slow"'},
+                    "parameters": {"language": "bash", "code": 'sleep 15 && echo "Slow"'},
                 },
                 {
                     "id": "intermediate",
@@ -354,7 +352,7 @@ def test_converge_timeout_fail_and_skip_downstream(syntara_api: SyntaraApiRegist
                     "id": "converge_node",
                     "name": "Converge with fail on timeout",
                     "type": "converge",
-                    "parameters": {"wait_duration": 15},
+                    "parameters": {"wait_duration": 8},
                 },
                 {
                     "id": "downstream_action",
@@ -372,7 +370,7 @@ def test_converge_timeout_fail_and_skip_downstream(syntara_api: SyntaraApiRegist
                 {"from": "converge_node", "to": "downstream_action"},
             ],
         },
-        timeout=120,
+        timeout=30,
     )
 
     assert result.status == ExecutionStatus.FAILED
@@ -456,7 +454,6 @@ def test_converge_cof_any_strategy_threshold_not_met(syntara_api: SyntaraApiRegi
                 {"from": "converge_node", "to": "final_action"},
             ],
         },
-        timeout=120,
     )
 
     assert result.status == ExecutionStatus.COMPLETED_WITH_ERRORS
@@ -502,7 +499,7 @@ def test_converge_no_timeout_when_all_complete(syntara_api: SyntaraApiRegistry):
                     "id": "converge_node",
                     "name": "Converge with long timeout",
                     "type": "converge",
-                    "parameters": {"wait_duration": 30},
+                    "parameters": {"wait_duration": 15},
                 },
                 {
                     "id": "final_action",
@@ -519,7 +516,6 @@ def test_converge_no_timeout_when_all_complete(syntara_api: SyntaraApiRegistry):
                 {"from": "converge_node", "to": "final_action"},
             ],
         },
-        timeout=120,
     )
 
     assert result.status == ExecutionStatus.COMPLETED
@@ -686,7 +682,6 @@ def test_converge_one_branch_fails_all_strategy(syntara_api: SyntaraApiRegistry)
                 {"from": "converge_node", "to": "final_action"},
             ],
         },
-        timeout=120,
     )
 
     assert result.status == ExecutionStatus.FAILED
@@ -763,7 +758,6 @@ def test_converge_branch_failure_any_strategy(syntara_api: SyntaraApiRegistry):
                 {"from": "converge_node", "to": "final_action"},
             ],
         },
-        timeout=120,
     )
 
     assert result.status == ExecutionStatus.FAILED
@@ -834,7 +828,6 @@ def test_converge_all_branches_fail(syntara_api: SyntaraApiRegistry):
                 {"from": "converge_node", "to": "final_action"},
             ],
         },
-        timeout=120,
     )
 
     assert result.status == ExecutionStatus.FAILED
