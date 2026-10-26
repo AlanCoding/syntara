@@ -27,7 +27,11 @@ if TYPE_CHECKING:
     from syntara_api_client.models.approval_request_read import ApprovalRequestRead
 
 POLL_INTERVAL = 1
-POLL_TIMEOUT = 20
+# On feat/ANSTRAT-1803 every script node is a cold-start pod on the Execution
+# Plane, dispatched serially by the EP worker (~5-10s per node). Multi-node
+# workflows routinely need 30-60s+, so the default poll budget must absorb
+# both that latency and any queue backlog left by earlier tests.
+POLL_TIMEOUT = 90
 API_RETRIES = 3
 API_RETRY_DELAY = 2
 
@@ -62,7 +66,7 @@ TERMINAL_ACTIVITY_STATUSES: frozenset[str] = frozenset({"completed", "failed", "
 # After an execution reaches a terminal state, its activity_execution rows may still be
 # syncing from Temporal (e.g. an agentic node briefly reported as "running"). Wait up to
 # this many seconds for every present activity to also reach a terminal state.
-ACTIVITY_SETTLE_TIMEOUT = 15
+ACTIVITY_SETTLE_TIMEOUT = 45
 
 
 def _retry_api_call(fn, *, retries: int = API_RETRIES, delay: float = API_RETRY_DELAY):  # noqa: ANN202
@@ -317,7 +321,7 @@ def extended_definition() -> dict[str, Any]:
 def poll_execution_until_complete(
     syntara_api: SyntaraApiRegistry,
     execution_id: UUID,
-    max_polls: int = 30,
+    max_polls: int = 60,
     poll_interval: int = 2,
 ) -> ExecutionRead:
     """Poll execution until it reaches a terminal state.

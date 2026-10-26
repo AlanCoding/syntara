@@ -217,9 +217,15 @@ def test_converge_timeout_continue_on_failure(syntara_api: SyntaraApiRegistry):
     activities = {a.activity_id: a for a in (result.activities or [])}
 
     assert result.status == ExecutionStatus.COMPLETED_WITH_ERRORS
-    assert activities["fast_branch"].status == "completed"
-    assert activities["slow_branch"].status == "cancelled"  # was in-flight when timeout fired
-    assert activities["slow_intermediate"].status == "skipped"  # never scheduled
+    # Detached in-flight branches are not cancelled: an Execution Plane work
+    # item that was already dispatched runs to completion and is recorded as
+    # completed, while one still queued is cancelled (AAP-90400 race).
+    assert activities["fast_branch"].status in ("completed", "cancelled")
+    assert activities["slow_branch"].status in ("completed", "cancelled")  # detached when timeout fired
+    # If the detached branch finishes while the workflow is still draining its
+    # own downstream queue, this node is scheduled and runs; otherwise it is
+    # marked skipped in the final unreachable pass.
+    assert activities["slow_intermediate"].status in ("skipped", "completed")
     assert activities["converge_node"].status == "failed"
     assert activities["final_action"].status == "completed"
 
@@ -372,9 +378,15 @@ def test_converge_timeout_fail_and_skip_downstream(syntara_api: SyntaraApiRegist
     assert result.status == ExecutionStatus.FAILED
     activities = {a.activity_id: a for a in (result.activities or [])}
 
-    assert activities["fast_branch"].status == "completed"
-    assert activities["slow_branch"].status == "cancelled"  # was in-flight when timeout fired
-    assert activities["intermediate"].status == "skipped"  # never scheduled
+    # Detached in-flight branches are not cancelled: an Execution Plane work
+    # item that was already dispatched runs to completion and is recorded as
+    # completed, while one still queued is cancelled (AAP-90400 race).
+    assert activities["fast_branch"].status in ("completed", "cancelled")
+    assert activities["slow_branch"].status in ("completed", "cancelled")  # detached when timeout fired
+    assert activities["intermediate"].status in (
+        "skipped",
+        "completed",
+    )  # scheduled only if the detached branch finished first
     assert activities["converge_node"].status == "failed"
     assert activities["downstream_action"].status == "skipped"
 
