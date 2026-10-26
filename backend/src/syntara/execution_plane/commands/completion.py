@@ -37,8 +37,14 @@ class CompletionCommandHandler:
                 non_retryable=True,
             )
         if status == "reconciliation_required":
+            message = "Execution Plane could not determine the work outcome"
+            # Surface the Execution Plane's reason (worker crash, lost callback,
+            # conflicting cold-start Job, ...) so executions are self-diagnosing.
+            reason = str(result.get("error", "")).strip()
+            if reason:
+                message = f"{message}: {reason}"
             return ApplicationError(
-                "Execution Plane could not determine the work outcome",
+                message,
                 result,
                 type="ExecutionPlaneReconciliationRequired",
                 non_retryable=True,
