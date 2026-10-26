@@ -77,8 +77,16 @@ def test_converge_any_2_of_3_strategy(syntara_api: SyntaraApiRegistry):
 
     Branches A and B succeed, meeting the any-2-of-3 threshold. Branch C
     fails immediately. The converge fires with the 2 successful branches.
-    The workflow status is COMPLETED_WITH_ERRORS because the converge
-    succeeded (handling the branch failure) but a failure is still recorded.
+
+    The workflow status and branch_c's recorded outcome depend on whether
+    branch_c failed before or after the threshold fired — a race that is
+    deterministic in neither direction on the Execution Plane, where script
+    nodes are cold-start pods. Per the ANY-converge contract (syntara#1043
+    review), a branch still in flight when the threshold is met no longer
+    participates: the workflow stays COMPLETED and the branch is recorded
+    cancelled. If the failure lands first, it is recorded and the workflow
+    is COMPLETED_WITH_ERRORS. Both outcomes are valid; authors who need
+    every branch's outcome should use the ALL strategy.
     """
     result = create_and_run_workflow(
         syntara_api,
@@ -136,12 +144,14 @@ def test_converge_any_2_of_3_strategy(syntara_api: SyntaraApiRegistry):
         },
     )
 
-    assert result.status == ExecutionStatus.COMPLETED_WITH_ERRORS
+    assert result.status in (ExecutionStatus.COMPLETED, ExecutionStatus.COMPLETED_WITH_ERRORS)
     activities = {a.activity_id: a for a in (result.activities or [])}
 
     assert activities["branch_a"].status == "completed"
     assert activities["branch_b"].status == "completed"
-    assert activities["branch_c"].status == "failed"
+    # 'failed' when the failure landed before the threshold fired; 'cancelled'
+    # when branch_c was detached in flight (ANY threshold already met)
+    assert activities["branch_c"].status in ("failed", "cancelled")
     assert activities["converge_node"].status == "completed"
     assert activities["final_action"].status == "completed"
 
