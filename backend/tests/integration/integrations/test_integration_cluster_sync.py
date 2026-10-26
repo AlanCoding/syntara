@@ -1,23 +1,30 @@
-"""AO integration-sync outbox tests for OpenShift resources."""
+"""OpenShift integration writes synchronously save the corresponding EP cluster."""
 
+from typing import Never
 from uuid import UUID
 
 import pytest
-from sqlmodel import col, select
+from execution_plane_client.protocol import MessageEnvelope
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from syntara.core.models import User
-from syntara.core.services.secret_service import SecretService, create_secret_service
-from syntara.execution_plane.integration_sync_model import ExecutionPlaneIntegrationSync
+from syntara.execution_plane.integration_sync import reconcile_integration_clusters
 from syntara.integrations.exceptions import IntegrationCredentialRequiredError
-from syntara.integrations.models.integration import IntegrationCreate, IntegrationType, IntegrationUpdate
+from syntara.integrations.models.integration import (
+    Integration,
+    IntegrationCreate,
+    IntegrationScope,
+    IntegrationType,
+    IntegrationUpdate,
+)
 from syntara.integrations.services.integration_service import IntegrationService
 from tests.integration.helpers.credential import CredentialFactory
 
 
-def _openshift_create(name: str = "Test OpenShift", credential_id: UUID | None = None) -> IntegrationCreate:
+def _openshift_create(credential_id: UUID | None = None) -> IntegrationCreate:
     return IntegrationCreate(
-        name=name,
+        name="Test OpenShift",
         integration_type=IntegrationType.OPENSHIFT,
         configuration={
             "integration_type": "openshift",
@@ -28,122 +35,93 @@ def _openshift_create(name: str = "Test OpenShift", credential_id: UUID | None =
     )
 
 
-async def _make_bearer_credential(
+@pytest.mark.asyncio
+async def test_openshift_crud_and_project_assignments_submit_cluster_commands(
+    test_db_session: AsyncSession,
+    test_user: User,
     credential_factory: CredentialFactory,
-) -> tuple[UUID, SecretService]:
-    credential_type = await credential_factory.create_type("HTTP Bearer Token")
-    credential_type.injectors = {"extra_vars": {"bearer_token": "{{token}}"}, "env": {}, "file": {}}
-    project = await credential_factory.create_project()
-    credential = await credential_factory.create(credential_type, project)
-    secret_service = create_secret_service(credential_factory.session)
-    credential.secret_id = await secret_service.create_secret({"token": "test-api-key"})
-    await credential_factory.session.flush()
-    return UUID(str(credential.id)), secret_service
+    http_bearer_token_credential_id: UUID,
+    ep_cluster_commands: list[MessageEnvelope],
+) -> None:
+    service = IntegrationService(test_db_session, test_user)
+    integration = await service.create_integration(_openshift_create(http_bearer_token_credential_id))
 
-
-async def _sync_rows(session: AsyncSession, integration_id: UUID) -> list[ExecutionPlaneIntegrationSync]:
-    result = await session.exec(
-        select(ExecutionPlaneIntegrationSync)
-        .where(ExecutionPlaneIntegrationSync.integration_id == integration_id)
-        .order_by(col(ExecutionPlaneIntegrationSync.source_revision))
+    updated = await service.update_integration(
+        integration.id,
+        IntegrationUpdate(
+            name="Renamed OpenShift",
+            enabled=False,
+            scope=IntegrationScope.PROJECT,
+            labels={"team": "platform"},
+            management_credential_id=http_bearer_token_credential_id,
+            configuration={
+                "integration_type": "openshift",
+                "base_url": "https://other.example.com:6443",
+                "namespace": "other-workers",
+            },
+        ),
     )
-    return list(result.all())
+    assert updated.name == "Renamed OpenShift"
+    assert updated.enabled is False
+    project = await credential_factory.create_project()
+    assignment = await service.assign_project(integration.id, project.id)
+    assert assignment.project_id == project.id
+    await service.unassign_project(integration.id, project.id)
+    await service.delete_integration(integration.id)
+
+    assert await test_db_session.get(Integration, integration.id) is None
+    assert [message.command.command_type for message in ep_cluster_commands] == [
+        "cluster.register",
+        "cluster.update",
+        "cluster.update",
+        "cluster.update",
+        "cluster.delete",
+    ]
+    payloads = [message.command.payload for message in ep_cluster_commands]
+    assert [payload["desired_revision"] for payload in payloads] == [1, 2, 3, 4, 5]
+    assert all(payload["resource_key"] == str(integration.id) for payload in payloads)
+    assert payloads[0]["namespace"] == "syntara-workers"
+    assert payloads[0]["credential_ref"] == str(http_bearer_token_credential_id)
+    assert payloads[1]["enabled"] is False
+    assert payloads[2]["project_ids"] == [str(project.id)]
+    assert payloads[3]["project_ids"] == []
 
 
-class TestIntegrationSyncOutbox:
-    """AO CRUD commits EP desired-state intents without calling EP inline."""
+@pytest.mark.asyncio
+async def test_openshift_create_still_requires_a_management_credential(
+    test_db_session: AsyncSession,
+    test_user: User,
+) -> None:
+    service = IntegrationService(test_db_session, test_user)
+    with pytest.raises(IntegrationCredentialRequiredError):
+        await service.create_integration(_openshift_create())
 
-    @pytest.mark.asyncio
-    async def test_openshift_create_records_versioned_upsert(
-        self,
-        test_db_session: AsyncSession,
-        test_user: User,
-        credential_factory: CredentialFactory,
-    ) -> None:
-        credential_id, _ = await _make_bearer_credential(credential_factory)
-        service = IntegrationService(test_db_session, test_user)
 
-        integration = await service.create_integration(_openshift_create(credential_id=credential_id))
+@pytest.mark.asyncio
+async def test_manual_reconciliation_recovers_missing_cluster_and_reuses_it(
+    test_db_session: AsyncSession,
+    test_db_session_factory: async_sessionmaker[AsyncSession],
+    test_user: User,
+    http_bearer_token_credential_id: UUID,
+    ep_cluster_commands: list[MessageEnvelope],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from syntara.execution_plane import cluster_sync_commands
+    from syntara.execution_plane.client import ExecutionPlaneUnavailableError
 
-        rows = await _sync_rows(test_db_session, integration.id)
-        assert len(rows) == 1
-        assert rows[0].operation == "upsert"
-        assert rows[0].source_revision == 1
-        assert rows[0].name == "Test OpenShift"
-        assert rows[0].endpoint == "https://openshift.example.com:6443"
-        assert integration.execution_plane_status == "pending"
+    def unavailable() -> Never:
+        raise ExecutionPlaneUnavailableError
 
-    @pytest.mark.asyncio
-    async def test_openshift_create_requires_a_management_credential(
-        self,
-        test_db_session: AsyncSession,
-        test_user: User,
-    ) -> None:
-        service = IntegrationService(test_db_session, test_user)
-        with pytest.raises(IntegrationCredentialRequiredError):
-            await service.create_integration(_openshift_create())
+    service = IntegrationService(test_db_session, test_user)
+    with monkeypatch.context() as outage:
+        outage.setattr(cluster_sync_commands, "ExecutionPlaneHttpClient", unavailable)
+        integration = await service.create_integration(_openshift_create(http_bearer_token_credential_id))
+    assert ep_cluster_commands == []
+    async with test_db_session_factory() as reader:
+        assert await reader.get(Integration, integration.id) is not None
 
-    @pytest.mark.asyncio
-    async def test_non_openshift_create_does_not_queue_ep_state(
-        self,
-        test_db_session: AsyncSession,
-        test_user: User,
-    ) -> None:
-        service = IntegrationService(test_db_session, test_user)
-        integration = await service.create_integration(
-            IntegrationCreate(
-                name="Test MCP",
-                integration_type=IntegrationType.MCP_SERVER,
-                configuration={"integration_type": "mcp_server", "base_url": "http://localhost:8080"},
-            )
-        )
-        assert await _sync_rows(test_db_session, integration.id) == []
-
-    @pytest.mark.asyncio
-    async def test_delete_records_a_disable_tombstone(
-        self,
-        test_db_session: AsyncSession,
-        test_user: User,
-        credential_factory: CredentialFactory,
-    ) -> None:
-        credential_id, _ = await _make_bearer_credential(credential_factory)
-        service = IntegrationService(test_db_session, test_user)
-        integration = await service.create_integration(_openshift_create(credential_id=credential_id))
-
-        await service.delete_integration(integration.id)
-
-        rows = await _sync_rows(test_db_session, integration.id)
-        assert [row.operation for row in rows] == ["upsert", "delete"]
-        assert rows[-1].source_revision == 2
-
-    @pytest.mark.asyncio
-    async def test_relevant_update_increments_the_outbox_revision(
-        self,
-        test_db_session: AsyncSession,
-        test_user: User,
-        credential_factory: CredentialFactory,
-    ) -> None:
-        credential_id, _ = await _make_bearer_credential(credential_factory)
-        service = IntegrationService(test_db_session, test_user)
-        integration = await service.create_integration(_openshift_create(credential_id=credential_id))
-
-        await service.update_integration(integration.id, IntegrationUpdate(name="Renamed OpenShift"))
-
-        rows = await _sync_rows(test_db_session, integration.id)
-        assert [row.source_revision for row in rows] == [1, 2]
-        assert rows[-1].name == "Renamed OpenShift"
-
-    @pytest.mark.asyncio
-    async def test_create_returns_while_ep_sync_is_pending(
-        self,
-        test_db_session: AsyncSession,
-        test_user: User,
-        credential_factory: CredentialFactory,
-    ) -> None:
-        credential_id, _ = await _make_bearer_credential(credential_factory)
-        service = IntegrationService(test_db_session, test_user)
-
-        integration = await service.create_integration(_openshift_create(credential_id=credential_id))
-
-        assert integration.execution_plane_status == "pending"
-        assert (await _sync_rows(test_db_session, integration.id))[0].processed_at is None
+    for _ in range(2):
+        result = await reconcile_integration_clusters(test_db_session_factory, integration.id)
+        assert result == {"synced": 1, "failed": 0, "skipped": 0}
+    assert [message.command.command_type for message in ep_cluster_commands] == ["cluster.register", "cluster.update"]
+    assert all(message.command.payload["resource_key"] == str(integration.id) for message in ep_cluster_commands)

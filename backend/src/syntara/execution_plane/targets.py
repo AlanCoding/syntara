@@ -61,24 +61,20 @@ class ExecutionTargetDeleteAccepted(SQLModel):
 
 
 class _InstalledCluster(SQLModel):
-    """Internal adapter for today's binding-backed EP inventory, not an AO API model."""
+    """Installed cluster fields used to create targets."""
 
-    cluster_id: UUID
+    id: UUID
     endpoint: str
 
 
 async def _installed_cluster(client: ExecutionPlaneHttpClient) -> _InstalledCluster:
-    """Resolve one physical cluster without exposing binding identity to callers.
-
-    Item 3 will replace binding-backed inventory with actual-cluster reads. Keep
-    that compatibility change here, away from the public target-write contract.
-    """
-    page = await client.list_cluster_bindings(limit=2)
+    """Resolve the single installed cluster from EP inventory."""
+    page = await client.list_clusters(limit=2)
     if len(page["resources"]) != 1 or page.get("next") or page.get("prev"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Expected exactly one installed Execution Plane cluster")
     resource = page["resources"][0]
-    if resource.get("cluster_id") is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Installed Execution Plane cluster is not ready")
+    if resource.get("id") is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Installed Execution Plane cluster has no ID")
     return _InstalledCluster.model_validate(resource)
 
 
@@ -111,7 +107,7 @@ async def create_target(client: ExecutionPlaneHttpClient, data: ExecutionTargetC
     target_id = uuid4()
     command = TargetRegister(
         resource_id=target_id,
-        cluster_id=cluster.cluster_id,
+        cluster_id=cluster.id,
         name=data.name,
         backend_type="vanilla_k8s",
         endpoint=cluster.endpoint,

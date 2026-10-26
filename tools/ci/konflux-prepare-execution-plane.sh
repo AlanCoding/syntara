@@ -14,7 +14,7 @@
 #   4. Sets EP_COMPLETION_CALLBACK_URL and
 #      EP_CREDENTIAL_RESOLUTION_CALLBACK_URL to AO's
 #      /api/execution_plane/v1/commands ingress.
-#   5. Registers the Kind cluster as an EP cluster-binding via the EP API.
+#   5. Registers the Kind cluster as an EP cluster via the EP API.
 #   6. Points myao-worker at the operator EP (APP_EP_API_URL) and pre-pulls
 #      the script-node image.
 #
@@ -277,7 +277,7 @@ _enable_script_dispatch() {
   kubectl rollout status "deploy/${AO_NAME}-worker" -n "${AO_NAMESPACE}" --timeout=180s
 }
 
-_register_cluster_binding() {
+_register_cluster() {
   local issuer=$1 credential_ref=$2
   kubectl get configmap kube-root-ca.crt -n "${AO_NAMESPACE}" \
     -o jsonpath='{.data.ca\.crt}' > "${WORK_DIR}/cluster-ca.pem"
@@ -300,18 +300,17 @@ payload = {
 }
 json.dump(payload, sys.stdout)
 " "${CLUSTER_NAME}" "${ENDPOINT}" "${NAMESPACE}" "${issuer}" "${credential_ref}" "${WORK_DIR}/cluster-ca.pem" \
-    > "${WORK_DIR}/binding.json"
+    > "${WORK_DIR}/cluster.json"
 
   kubectl exec -i -n "${AO_NAMESPACE}" "deploy/${EP_API_DEPLOY}" -- \
     /bin/sh -c 'cat > /tmp/jwt-primary.pem' < "${WORK_DIR}/jwt-primary.pem"
   kubectl exec -i -n "${AO_NAMESPACE}" "deploy/${EP_API_DEPLOY}" -- \
-    /bin/sh -c 'cat > /tmp/binding.json' < "${WORK_DIR}/binding.json"
+    /bin/sh -c 'cat > /tmp/cluster.json' < "${WORK_DIR}/cluster.json"
 
-  echo "=== Register cluster binding via operator EP API ==="
+  echo "=== Register cluster via operator EP API ==="
   kubectl exec -i -n "${AO_NAMESPACE}" "deploy/${EP_API_DEPLOY}" -- \
     /opt/app-root/src/.venv/bin/python - <<'PY'
 import json
-import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -321,7 +320,7 @@ import jwt
 
 from execution_plane_client.commands.clusters import ClusterProvision
 
-payload = json.loads(Path("/tmp/binding.json").read_text())
+payload = json.loads(Path("/tmp/cluster.json").read_text())
 key = Path("/tmp/jwt-primary.pem").read_text()
 now = datetime.now(UTC)
 token = jwt.encode(
@@ -341,56 +340,57 @@ desired = payload["desired"]
 base = "https://127.0.0.1:8443"
 headers = {"Authorization": f"Bearer {token}"}
 with httpx.Client(verify=False, timeout=30.0) as client:
-    got = client.get(f"{base}/v1/clusters/{sid}", headers=headers)
-    revision = 1
-    if got.status_code == 200:
-        revision = int(got.json()["desired_revision"]) + 1
-    envelope = ClusterProvision(
-        resource_key=sid,
-        desired_revision=revision,
-        name=desired["name"],
-        endpoint=desired["endpoint"],
-        namespace=desired["namespace"],
-        credential_ref=uuid.UUID(desired["credential_ref"]),
-        ca_certificate=desired["ca_certificate"],
-        enabled=True,
-        labels=desired["labels"],
-    ).to_message(
-        source_id="syntara-orchestration",
-        destination_id="execution-plane",
-        client_id="syntara-orchestration",
+    inventory = client.get(
+        f"{base}/v1/clusters", headers=headers,
+        params={"source_integration_id": str(sid), "limit": 2},
     )
-    posted = client.post(
-        f"{base}/v1/commands",
-        headers=headers,
-        json=envelope.model_dump(mode="json"),
-    )
-    if posted.status_code >= 400:
-        raise SystemExit(f"cluster.provision failed ({posted.status_code}): {posted.text}")
-    print(f"upserted cluster {sid} revision {revision} status={posted.status_code}")
-    deadline = time.time() + 90
-    while time.time() < deadline:
-        status, message = "unknown", ""
-        got = client.get(f"{base}/v1/clusters/{sid}", headers=headers)
-        if got.status_code == 200:
-            doc = got.json()
-            status = doc.get("status") or "unknown"
-            message = doc.get("status_message") or ""
-            print(f"cluster binding status: {status}")
-            if status == "ready":
-                break
-            if status == "error":
-                raise SystemExit(message or "cluster binding reconciliation failed")
-        time.sleep(3)
+    inventory.raise_for_status()
+    page = inventory.json()
+    clusters = page["resources"]
+    if len(clusters) > 1 or page.get("next"):
+        raise SystemExit("multiple clusters match the installation identity")
+    if clusters:
+        cluster_id = uuid.UUID(clusters[0]["id"])
     else:
-        raise SystemExit(f"timed out waiting for cluster {sid} to become ready")
+        envelope = ClusterProvision(
+            resource_key=sid,
+            desired_revision=1,
+            name=desired["name"],
+            endpoint=desired["endpoint"],
+            namespace=desired["namespace"],
+            credential_ref=uuid.UUID(desired["credential_ref"]),
+            ca_certificate=desired["ca_certificate"],
+            enabled=True,
+            labels=desired["labels"],
+        ).to_message(
+            source_id="syntara-orchestration",
+            destination_id="execution-plane",
+            client_id="syntara-orchestration",
+        )
+        posted = client.post(
+            f"{base}/v1/commands", headers=headers,
+            json=envelope.model_dump(mode="json"),
+        )
+        if posted.status_code >= 400:
+            raise SystemExit(f"cluster.provision failed ({posted.status_code}): {posted.text}")
+        receipt = posted.json()
+        resource = receipt.get("resource") or {}
+        if receipt.get("message_id") != str(envelope.message_id) or resource.get("kind") != "cluster":
+            raise SystemExit("cluster.provision returned an invalid receipt")
+        cluster_id = uuid.UUID(resource["resource_id"])
+    got = client.get(f"{base}/v1/clusters/{cluster_id}", headers=headers)
+    got.raise_for_status()
+    cluster = got.json()
+    if cluster["status"] != "active" or not cluster["enabled"]:
+        raise SystemExit(f"installed cluster is unavailable: {cluster['status']}")
+    print(f"installed cluster {cluster_id} status={cluster['status']}")
     targets = client.get(f"{base}/v1/execution-targets", headers=headers)
     if targets.status_code >= 400:
         raise SystemExit(f"listing execution targets failed ({targets.status_code}): {targets.text}")
-    print(f"execution targets: {len(targets.json())}")
+    print(f"execution targets: {len(targets.json()['resources'])}")
 PY
   kubectl exec -n "${AO_NAMESPACE}" "deploy/${EP_API_DEPLOY}" -- \
-    rm -f /tmp/jwt-primary.pem /tmp/binding.json >/dev/null 2>&1 || true
+    rm -f /tmp/jwt-primary.pem /tmp/cluster.json >/dev/null 2>&1 || true
 }
 
 echo "=== Cluster ==="
@@ -471,7 +471,7 @@ echo "AO JWT issuer: ${AO_JWT_ISSUER}"
 
 _allow_ep_callback_identity
 _configure_ep_callback_url
-_register_cluster_binding "${AO_JWT_ISSUER}" "${CREDENTIAL_REF}"
+_register_cluster "${AO_JWT_ISSUER}" "${CREDENTIAL_REF}"
 _prepull_node_image "${NODE_IMAGE}"
 _enable_script_dispatch "${NODE_IMAGE}"
 

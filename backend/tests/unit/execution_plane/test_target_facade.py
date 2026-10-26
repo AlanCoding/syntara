@@ -50,11 +50,10 @@ def harness(monkeypatch):
 
     requests = []
     state = {
-        "status": "ready",
+        "id": str(CLUSTER_ID),
+        "source_integration_id": str(uuid4()),
+        "status": "active",
         "enabled": True,
-        "desired_revision": 2,
-        "observed_revision": 2,
-        "cluster_id": str(CLUSTER_ID),
         "endpoint": TARGET["endpoint"],
     }
     target = dict(TARGET)
@@ -126,7 +125,7 @@ async def test_create_resolves_cluster_and_returns_ep_resource(harness, is_defau
 @pytest.mark.parametrize(
     "state_patch",
     [
-        {"cluster_id": None},
+        {"id": None},
         {"resources": []},
         {"resources": [{}, {}]},
         {"next": "more-clusters"},
@@ -143,10 +142,10 @@ async def test_create_requires_one_existing_cluster(harness, state_patch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("is_default", [False, True])
-@pytest.mark.parametrize("status", ["pending", "error", "disabled", "ready"])
+@pytest.mark.parametrize("status", ["provisioning", "error", "draining", "active"])
 async def test_create_can_configure_disabled_or_unready_cluster(harness, is_default, status):
     app, requests, state = harness
-    state.update({"status": status, "enabled": False, "observed_revision": 1})
+    state.update({"status": status, "enabled": False, "id": str(CLUSTER_ID)})
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="https://ao.example") as client:
         response = await client.post(PREFIX, json={"name": "batch", "placement": PLACEMENT, "is_default": is_default})
     assert response.status_code == 201
@@ -308,7 +307,7 @@ async def test_create_rejects_cluster_selection_and_credentials(harness, field):
 @pytest.mark.parametrize(
     "patch",
     [
-        {"cluster_id": "not-a-uuid"},
+        {"id": "not-a-uuid"},
         {"endpoint": "http://insecure.example"},
         {"resources": ["invalid"]},
     ],

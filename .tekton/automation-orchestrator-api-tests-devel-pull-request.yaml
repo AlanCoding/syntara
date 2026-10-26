@@ -80,11 +80,13 @@ spec:
       value: AAP-90779-ep-from-source
     # Execution Plane server revision; keep in sync with the
     # execution-plane-client protocol the syntara branch under test pins.
-    # Pinned to the concurrent-dispatch branch until that lands on EP devel:
-    # the worker otherwise dispatches work items serially, making every
-    # multi-script e2e workflow marginal against its original poll budget.
+    # Pinned to syntara-execution-plane#88 for synchronous cluster
+    # provisioning and removal of ClusterBinding, which this syntara branch
+    # depends on. Restore devel once #88 lands.
     - name: ep-revision
-      value: devel
+      value: mvp-03-remove-cluster-binding
+    - name: ep-pr-number
+      value: "88"
   taskRunTemplate:
     serviceAccountName: konflux-integration-runner
   pipelineSpec:

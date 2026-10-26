@@ -1,108 +1,102 @@
-"""OpenShift integration routes persist EP sync intent in AO's outbox."""
+"""Integration writes persist desired state even when EP delivery fails."""
 
+from typing import Never
 from uuid import UUID
 
 import pytest
+from execution_plane_client.protocol import MessageEnvelope
 from httpx import AsyncClient
-from sqlmodel import col, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from syntara.execution_plane.integration_sync_model import ExecutionPlaneIntegrationSync
-from syntara.integrations.models.integration import IntegrationType
+from syntara.execution_plane import cluster_sync_commands
+from syntara.execution_plane.client import ExecutionPlaneRejectedError, ExecutionPlaneUnavailableError
+from syntara.execution_plane.integration_sync import reconcile_integration_clusters
 
 BASE_URL = "/api/v1/integrations"
 
 
-def _payload(name: str, credential_id: UUID) -> dict[str, object]:
-    return {
-        "name": name,
-        "integration_type": IntegrationType.OPENSHIFT.value,
+@pytest.mark.asyncio
+async def test_create_update_delete_and_recreate_submit_ep_commands(
+    auth_client: AsyncClient,
+    http_bearer_token_credential_id: UUID,
+    ep_cluster_commands: list[MessageEnvelope],
+) -> None:
+    payload = {
+        "name": "test-cluster",
+        "integration_type": "openshift",
         "configuration": {
-            "integration_type": IntegrationType.OPENSHIFT.value,
+            "integration_type": "openshift",
             "base_url": "https://api.example.com:6443",
             "namespace": "default",
-            "insecure_skip_tls_verify": False,
-            "allow_http": False,
-            "ca_certificate": None,
         },
-        "management_credential_id": str(credential_id),
+        "management_credential_id": str(http_bearer_token_credential_id),
         "scope": "global",
     }
+    first = await auth_client.post(BASE_URL, json=payload)
+    assert first.status_code == 201, first.text
+    assert not {"execution_plane_status", "execution_plane_revision", "execution_plane_error"} & first.json().keys()
+    first_id = first.json()["id"]
+
+    updated = await auth_client.patch(f"{BASE_URL}/{first_id}", json={"enabled": False})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["enabled"] is False
+    assert (await auth_client.delete(f"{BASE_URL}/{first_id}")).status_code == 204
+
+    second = await auth_client.post(BASE_URL, json=payload)
+    assert second.status_code == 201, second.text
+    assert second.json()["id"] != first_id
+    assert [message.command.command_type for message in ep_cluster_commands] == [
+        "cluster.register",
+        "cluster.update",
+        "cluster.delete",
+        "cluster.register",
+    ]
+    assert [message.command.payload["desired_revision"] for message in ep_cluster_commands] == [1, 2, 3, 1]
+    assert ep_cluster_commands[-1].command.payload["resource_key"] == second.json()["id"]
 
 
-async def _sync_rows(session: AsyncSession, integration_id: UUID) -> list[ExecutionPlaneIntegrationSync]:
-    result = await session.exec(
-        select(ExecutionPlaneIntegrationSync)
-        .where(ExecutionPlaneIntegrationSync.integration_id == integration_id)
-        .order_by(col(ExecutionPlaneIntegrationSync.source_revision))
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conflict", [False, True])
+async def test_ep_failure_preserves_ao_update_and_later_reconciliation_applies_it(
+    auth_client: AsyncClient,
+    http_bearer_token_credential_id: UUID,
+    monkeypatch: pytest.MonkeyPatch,
+    test_db_session_factory: async_sessionmaker[AsyncSession],
+    ep_cluster_commands: list[MessageEnvelope],
+    *,
+    conflict: bool,
+) -> None:
+    created = await auth_client.post(
+        BASE_URL,
+        json={
+            "name": "cluster-before-failure",
+            "integration_type": "openshift",
+            "configuration": {
+                "integration_type": "openshift",
+                "base_url": "https://api.example.com:6443",
+                "namespace": "default",
+            },
+            "management_credential_id": str(http_bearer_token_credential_id),
+        },
     )
-    return list(result.all())
+    assert created.status_code == 201, created.text
+    integration_id = created.json()["id"]
 
+    def fail_client() -> Never:
+        if conflict:
+            raise ExecutionPlaneRejectedError(status_code=409, detail="Cluster conflict")
+        raise ExecutionPlaneUnavailableError
 
-class TestOpenShiftIntegrationSyncOutbox:
-    """HTTP CRUD records asynchronous desired-state changes for the EP adapter."""
-
-    @pytest.mark.asyncio
-    async def test_create_records_upsert_and_pending_status(
-        self,
-        auth_client: AsyncClient,
-        test_db_session: AsyncSession,
-        http_bearer_token_credential_id: UUID,
-    ) -> None:
-        response = await auth_client.post(
-            BASE_URL, json=_payload("test-cluster-create", http_bearer_token_credential_id)
-        )
-        assert response.status_code == 201
-        body = response.json()
-        rows = await _sync_rows(test_db_session, UUID(body["id"]))
-
-        assert body["execution_plane_status"] == "pending"
-        assert len(rows) == 1
-        assert rows[0].operation == "upsert"
-        assert rows[0].source_revision == 1
-        assert rows[0].endpoint == "https://api.example.com:6443"
-        assert rows[0].namespace == "default"
-
-    @pytest.mark.asyncio
-    async def test_delete_records_a_tombstone(
-        self,
-        auth_client: AsyncClient,
-        test_db_session: AsyncSession,
-        http_bearer_token_credential_id: UUID,
-    ) -> None:
-        response = await auth_client.post(
-            BASE_URL, json=_payload("test-cluster-delete", http_bearer_token_credential_id)
-        )
-        assert response.status_code == 201
-        integration_id = UUID(response.json()["id"])
-
-        delete_response = await auth_client.delete(f"{BASE_URL}/{integration_id}")
-        assert delete_response.status_code == 204
-
-        rows = await _sync_rows(test_db_session, integration_id)
-        assert [row.operation for row in rows] == ["upsert", "delete"]
-        assert rows[-1].source_revision == 2
-
-    @pytest.mark.asyncio
-    async def test_recreated_name_gets_a_new_independent_binding(
-        self,
-        auth_client: AsyncClient,
-        test_db_session: AsyncSession,
-        http_bearer_token_credential_id: UUID,
-    ) -> None:
-        first = await auth_client.post(
-            BASE_URL, json=_payload("test-cluster-recreate", http_bearer_token_credential_id)
-        )
-        assert first.status_code == 201
-        first_id = UUID(first.json()["id"])
-        assert (await auth_client.delete(f"{BASE_URL}/{first_id}")).status_code == 204
-
-        second = await auth_client.post(
-            BASE_URL, json=_payload("test-cluster-recreate", http_bearer_token_credential_id)
-        )
-        assert second.status_code == 201
-        second_id = UUID(second.json()["id"])
-
-        assert second_id != first_id
-        assert [row.operation for row in await _sync_rows(test_db_session, first_id)] == ["upsert", "delete"]
-        assert [row.operation for row in await _sync_rows(test_db_session, second_id)] == ["upsert"]
+    with monkeypatch.context() as unavailable:
+        unavailable.setattr(cluster_sync_commands, "ExecutionPlaneHttpClient", fail_client)
+        response = await auth_client.patch(f"{BASE_URL}/{integration_id}", json={"enabled": False})
+    assert response.status_code == 200, response.text
+    current = await auth_client.get(f"{BASE_URL}/{integration_id}")
+    assert current.status_code == 200
+    assert current.json()["enabled"] is False
+    assert len(ep_cluster_commands) == 1
+    result = await reconcile_integration_clusters(test_db_session_factory, UUID(integration_id))
+    assert result == {"synced": 1, "failed": 0, "skipped": 0}
+    assert ep_cluster_commands[-1].command.command_type == "cluster.update"
+    assert ep_cluster_commands[-1].command.payload["enabled"] is False

@@ -36,5 +36,5 @@ GET /api/execution_plane/v1/execution_targets?labels[env]=prod&enabled=true&sort
 
 This patch changes query transport and response handling. Existing authorization
 checks are preserved; project associations and RBAC are a separate next step.
-EP also has a cluster-binding list, but this AO router currently exposes only
+EP also has a cluster list, but this AO router currently exposes only
 work items and execution targets. No cluster list route is introduced here.

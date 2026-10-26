@@ -8,7 +8,7 @@ import asyncio
 import types
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import structlog
 from temporalio.client import Client
@@ -19,7 +19,7 @@ from syntara.core.config.base import get_encryption_key, get_settings
 from syntara.core.database.session import AsyncSessionLocal
 from syntara.core.lib.encryption import key_from_string
 from syntara.core.tls.temporal import build_temporal_tls_config
-from syntara.execution_plane.integration_sync import run_integration_sync_bridge
+from syntara.execution_plane.integration_sync import get_cluster_reconciliation_worker
 from syntara.telemetry.client import flush_telemetry, initialize_telemetry
 from syntara.workflows.services.activity_update_publisher import ActivityUpdatePublisher
 from syntara.workflows.workflow_engine.activities.registry import ACTIVITY_REGISTRY
@@ -34,6 +34,9 @@ from syntara.workflows.workflow_engine.scheduled_launcher import ScheduledExecut
 from syntara.workflows.workflow_engine.services.activity_sync_registry import set_activity_sync_service
 from syntara.workflows.workflow_engine.services.activity_sync_service import ActivitySyncService
 from syntara.workflows.workflow_engine.workflow_auth import init_signing_key
+
+if TYPE_CHECKING:
+    from syntara.core.workers.periodic import PeriodicWorker
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -88,7 +91,7 @@ class TemporalWorkerService:
         self.client: Client | None = None
         self.worker: Worker | None = None
         self._worker_task: asyncio.Task[None] | None = None
-        self._ep_integration_sync_task: asyncio.Task[None] | None = None
+        self._cluster_reconciliation_worker: PeriodicWorker | None = None
         self.activity_sync_service: ActivitySyncService | None = None
 
     def _build_concurrency_config(self) -> dict[str, int]:
@@ -184,11 +187,9 @@ class TemporalWorkerService:
 
             # Start worker in background task
             self._worker_task = asyncio.create_task(self.worker.run())
-            self._ep_integration_sync_task = asyncio.create_task(
-                run_integration_sync_bridge(),
-                name="ep-integration-sync-bridge",
-            )
-
+            if get_settings().ep_api_url:
+                self._cluster_reconciliation_worker = get_cluster_reconciliation_worker()
+                self._cluster_reconciliation_worker.start()
             concurrency = self._build_concurrency_config()
             logger.info("temporal_worker_started", task_queue=self.task_queue, **concurrency)
 
@@ -201,13 +202,9 @@ class TemporalWorkerService:
 
         Waits for in-progress tasks to complete before shutting down.
         """
-        if self._ep_integration_sync_task is not None:
-            self._ep_integration_sync_task.cancel()
-            try:
-                await self._ep_integration_sync_task
-            except asyncio.CancelledError:
-                logger.info("Execution Plane integration sync bridge stopped")
-            self._ep_integration_sync_task = None
+        if self._cluster_reconciliation_worker is not None:
+            await self._cluster_reconciliation_worker.stop()
+            self._cluster_reconciliation_worker = None
 
         # Shutdown activity sync service first
         if self.activity_sync_service:

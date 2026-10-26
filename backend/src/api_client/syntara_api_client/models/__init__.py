@@ -127,7 +127,6 @@ __all__ = (
     "ExecutionCreateInputData",
     "ExecutionListResponse",
     "ExecutionMode",
-    "ExecutionPlaneSyncStatus",
     "ExecutionRead",
     "ExecutionReadExecutionMetadataType0",
     "ExecutionReadInputData",

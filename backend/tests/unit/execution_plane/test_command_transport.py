@@ -38,7 +38,7 @@ async def test_command_transport_sends_shared_envelope_and_checks_receipt(monkey
     assert json.loads(requests[0].content) == message.model_dump(mode="json")
     assert "command.cancel" in client_module.EP_SCOPES.split()
     assert "work.execute" in client_module.EP_SCOPES.split()
-    assert "cluster.register" in client_module.EP_SCOPES.split()
+    assert {"cluster.register", "cluster.update", "cluster.delete"} <= set(client_module.EP_SCOPES.split())
     assert "clusters:read" in client_module.EP_SCOPES.split()
 
 
@@ -70,18 +70,28 @@ async def test_conflict_preserves_status_for_work_recovery(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cluster_observation_uses_resource_query(monkeypatch):
-    resource_id = uuid4()
-    paths = []
+async def test_cluster_inventory_uses_actual_cluster_ids(monkeypatch):
+    cluster_id = uuid4()
+    integration_id = uuid4()
+    requests = []
 
     def handle(request) -> httpx.Response:
-        paths.append(request.url.path)
-        return httpx.Response(200, json={"observed_revision": 3, "status": "ready"})
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "resources": [{"id": str(cluster_id), "source_integration_id": str(integration_id)}],
+                "next": None,
+                "prev": None,
+            },
+        )
 
     monkeypatch.setattr(client_module, "create_ep_service_token", lambda: "test-token")
     client = object.__new__(ExecutionPlaneHttpClient)
     client._client = httpx.AsyncClient(base_url="https://ep.example", transport=httpx.MockTransport(handle))
     async with client:
-        result = await client.get_cluster_binding(source_integration_id=resource_id)
-    assert paths == [f"/v1/clusters/{resource_id}"]
-    assert result["observed_revision"] == 3
+        result = await client.list_clusters(limit=2)
+    assert requests[0].url.path == "/v1/clusters"
+    assert requests[0].url.params["limit"] == "2"
+    assert result["resources"][0]["id"] == str(cluster_id)
+    assert result["resources"][0]["source_integration_id"] == str(integration_id)

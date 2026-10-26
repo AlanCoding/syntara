@@ -67,7 +67,8 @@ class TestTemporalWorkerServiceStart:
     """Test starting the Temporal worker service."""
 
     @pytest.mark.asyncio
-    async def test_start_success(self) -> None:
+    @pytest.mark.parametrize("ep_api_url", [None, "http://execution-plane:8000"])
+    async def test_start_success(self, ep_api_url: str | None) -> None:
         """Test successfully starting the worker service."""
         service = TemporalWorkerService(
             temporal_address="test-address", namespace="test-namespace", task_queue="test-queue"
@@ -76,6 +77,8 @@ class TestTemporalWorkerServiceStart:
         # Mock Temporal client and worker
         mock_client = MagicMock()
         mock_worker = MagicMock()
+        mock_reconciler = MagicMock()
+        mock_reconciler.stop = AsyncMock()
 
         # Create a simple coroutine for worker.run to avoid AsyncMock warnings
         async def mock_run() -> None:
@@ -99,6 +102,14 @@ class TestTemporalWorkerServiceStart:
                 new=AsyncMock(return_value=mock_client),
             ),
             patch("syntara.workflows.workflow_engine.services.temporal_worker.Worker", return_value=mock_worker),
+            patch(
+                "syntara.workflows.workflow_engine.services.temporal_worker.get_settings",
+                return_value=MagicMock(ep_api_url=ep_api_url),
+            ),
+            patch(
+                "syntara.workflows.workflow_engine.services.temporal_worker.get_cluster_reconciliation_worker",
+                return_value=mock_reconciler,
+            ) as get_reconciler,
             patch("asyncio.create_task", side_effect=mock_create_task),
         ):
             await service.start()
@@ -111,6 +122,21 @@ class TestTemporalWorkerServiceStart:
 
             # Verify worker task was created
             assert create_task_called
+
+            if ep_api_url:
+                get_reconciler.assert_called_once_with()
+                mock_reconciler.start.assert_called_once_with()
+            else:
+                get_reconciler.assert_not_called()
+                mock_reconciler.start.assert_not_called()
+
+            await service.stop()
+
+            if ep_api_url:
+                mock_reconciler.stop.assert_awaited_once_with()
+            else:
+                mock_reconciler.stop.assert_not_awaited()
+            assert service._cluster_reconciliation_worker is None
 
     @pytest.mark.asyncio
     async def test_start_with_custom_config(self) -> None:

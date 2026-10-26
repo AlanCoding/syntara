@@ -29,7 +29,7 @@ EP_CLIENT_ID = "syntara-orchestration"
 EP_AUDIENCE = "execution-plane"
 EP_TOKEN_LIFETIME_SECONDS = 300
 EP_SCOPES = (
-    "work.execute command.cancel cluster.register "
+    "work.execute command.cancel cluster.register cluster.update cluster.delete "
     "execution_target.register execution_target.update execution_target.delete "
     "work-items:read execution-targets:read clusters:read"
 )
@@ -168,10 +168,10 @@ class ExecutionPlaneHttpClient:
         """Read a caller-owned target without its management credentials."""
         return self._as_object(await self._request("GET", f"/v1/execution-targets/{target_id}"))
 
-    async def list_cluster_bindings(self, *, limit: int = 2) -> dict[str, Any]:
-        """Read bounded client-owned inventory for the installed-cluster adapter."""
+    async def list_clusters(self, *, limit: int = 2, filters: Mapping[str, str] | None = None) -> dict[str, Any]:
+        """Read bounded client-owned cluster inventory."""
         return await self._list_resources(
-            "/v1/clusters", limit=limit, cursor=None, sort=None, include_total=False, filters=None
+            "/v1/clusters", limit=limit, cursor=None, sort=None, include_total=False, filters=filters
         )
 
     async def _list_resources(
@@ -203,14 +203,6 @@ class ExecutionPlaneHttpClient:
             params["include_total"] = "true"
         response = await self._request("GET", path, params=params)
         return self._as_page(response)
-
-    async def get_cluster_binding(self, *, source_integration_id: UUID) -> dict[str, Any]:
-        """Read the safe observed state of an integration binding from EP."""
-        response = await self._request("GET", f"/v1/clusters/{source_integration_id}")
-        if response is None or isinstance(response, list):
-            msg = "Execution Plane returned an invalid cluster-binding response"
-            raise ExecutionPlaneRejectedError(msg)
-        return response
 
     async def _request(
         self,

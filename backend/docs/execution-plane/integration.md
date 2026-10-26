@@ -33,8 +33,8 @@ a `PATCH` containing `placement` also requires `placement.namespace`.
 `labels: {}` clears them. Empty `node_selectors` or `tolerations` lists clear those lists.
 `is_default=true` promotes the target. Deleting or demoting the current default
 returns 409 until another target is promoted.
-Disabling an integration preserves its EP cluster and targets. Target configuration
-can still be changed while the cluster is disabled; each target retains its own enabled flag.
+Integration writes save cluster configuration directly through EP commands;
+execution-target placement remains independently managed.
 See [read-query semantics](read-query-contract.md) and the generated EP OpenAPI for field schemas.
 
 ## Work and completion
@@ -69,19 +69,24 @@ the cancellation race wins.
 
 ## Integration configuration
 
-AO remains the source of integration configuration. Its durable outbox sends
-revisioned desired state to EP over the API. EP reports observed status and
-revision; AO presents `pending`, `ready`, or a safe error while the services
-converge. The two databases do not participate in a cross-service transaction.
-Cluster-management credentials are encrypted in EP's database. Workload
-credential mounts remain out of scope until ANSTRAT-2422 establishes the
-extension contract.
+AO commits OpenShift integration configuration before attempting EP delivery.
+The Temporal worker process reconciles current configuration every five minutes, configured by
+`APP_EP_CLUSTER_RECONCILIATION_INTERVAL_SECONDS` (default `300`). The immediate,
+periodic, and manual paths share PostgreSQL advisory-lock coordination. Failed
+or overlapping delivery leaves AO configuration saved for a later sweep.
 
-The two AO-owned status state machines are documented in:
+Run `automation-orchestrator-admin reconcile-clusters [--integration-id UUID]`
+for one manual pass; failures or a skipped busy pass produce a nonzero exit code.
+Each integration gets one bounded attempt. There is no outbox or polling status UI.
 
-- [Activity binding status progression](activity-binding-status.md)
-- [Integration execution-plane status progression](integration-status.md)
-- [Combined status progression overview](status-progression.md)
+The temporary adapter uses the existing EP source-key/revision commands. Physical
+Cluster-ID correlation and revision removal require the next EP contract update.
+Initial namespace applies when creating a missing Cluster/default target; later
+reconciliation does not rewrite independent target placement. Delete remains an
+explicit request subject to EP protections; this sweep does not delete orphans.
+
+Work completion is independent of this configuration lifecycle; see
+[activity binding status progression](activity-binding-status.md).
 
 ## Combined-service smoke evidence
 

@@ -144,7 +144,7 @@ make lint
 Execution Plane is an independent service in the public
 [syntara-execution-plane repository](https://github.com/syntara-orchestration/syntara-execution-plane).
 AO installs the separate `execution-plane-client` contract library from the
-upstream `v0.1.4` Git tag declared in `pyproject.toml`. `uv.lock` records the resolved
+Git source declared in `pyproject.toml`. `uv.lock` records the resolved
 commit for reproducibility; `make install` fetches it automatically.
 `make sync-requirements` exports hashed packages to `requirements.txt` and pinned
 Git packages to `requirements-vcs.txt` for Hermeto's separate prefetch passes.
@@ -169,6 +169,20 @@ make dev
 separate repositories. The EP worker delivers completion commands back to AO over
 the configured mTLS callback. Set `APP_EP_API_URL` and the EP runtime/migration
 database URLs in the backend environment when using a non-default setup.
+
+Integration-backed clusters are reconciled by the AO Temporal worker process every five
+minutes (`APP_EP_CLUSTER_RECONCILIATION_INTERVAL_SECONDS=300`). Integration saves
+commit AO configuration before one best-effort EP attempt. To run a pass manually:
+
+```bash
+cd backend
+uv run automation-orchestrator-admin reconcile-clusters
+# Restrict the pass to one integration:
+uv run automation-orchestrator-admin reconcile-clusters --integration-id <uuid>
+```
+
+The command returns nonzero on failures or when another reconciliation is active.
+Automatic orphan deletion is not enabled.
 
 For the complete containerized stack, build the local images and run:
 
