@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+if TYPE_CHECKING:
+    from tests.e2e.execution_plane.conftest import AoClient, EpClient
 
 pytestmark = [pytest.mark.e2e]
 
@@ -81,7 +84,7 @@ def _script_work_item_id(activities: list[dict[str, Any]]) -> str | None:
     return None
 
 
-def _work_item_from_ep(ep_client, ao_client, execution_id: str, marker: str) -> dict[str, Any]:
+def _work_item_from_ep(ep_client: EpClient, ao_client: AoClient, execution_id: str, marker: str) -> dict[str, Any]:
     """Return the EP work item that produced ``marker``, or fail if Temporal ran it."""
     temporal_bypass = (
         "AO completed hello-world but Execution Plane has no matching work item; "
@@ -97,7 +100,7 @@ def _work_item_from_ep(ep_client, ao_client, execution_id: str, marker: str) -> 
     return scanned
 
 
-def _scan_ep_for_marker(ep_client, marker: str) -> dict[str, Any] | None:
+def _scan_ep_for_marker(ep_client: EpClient, marker: str) -> dict[str, Any] | None:
     for summary in ep_client.list_work_items(status="completed"):
         work_item_id = summary.get("id")
         if not work_item_id:
