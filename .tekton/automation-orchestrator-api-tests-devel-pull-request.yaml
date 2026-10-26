@@ -80,7 +80,7 @@ spec:
     # the worker otherwise dispatches work items serially, making every
     # multi-script e2e workflow marginal against its original poll budget.
     - name: ep-revision
-      value: goneri/concurrent-dispatch
+      value: devel
   taskRunTemplate:
     serviceAccountName: konflux-integration-runner
   pipelineSpec:
