@@ -1,8 +1,9 @@
 """Cold-start hello-world workflow through the AO API.
 
-Replaces docs/feature-branch-assets/run-hello-world-demo.sh for the Konflux
-Kind pipeline: create a script-node workflow, start an execution, and wait
-until AO reports it completed via Execution Plane dispatch.
+Creates a script-node workflow, starts an execution, and waits until AO
+reports it completed via Execution Plane dispatch. Kept from the original
+standalone Konflux hello-world pipeline (syntara#999), now folded into the
+backend e2e suite.
 
 AO completion alone is not enough: a Temporal worker can run the script
 in-process and still report completed. The test therefore also reads the

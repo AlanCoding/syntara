@@ -1,4 +1,10 @@
-"""Fixtures for live AO+EP hello-world e2e (Konflux Kind or a local demo stack)."""
+"""Fixtures for the live AO+EP hello-world e2e (backend suite, local demo stack).
+
+Runs with the rest of the backend e2e suite. The AO half uses the same
+direct-httpx client as before; the Execution Plane half (the proof that the
+script ran on EP, not in Temporal) activates only when EP_API_URL is set —
+otherwise the test skips, like other optional-infrastructure e2e tests.
+"""
 
 from __future__ import annotations
 
@@ -24,14 +30,7 @@ _DEFAULT_POLL_INTERVAL_SECONDS = 3.0
 _EP_JWT_AUDIENCE = "execution-plane"
 _EP_JWT_CLIENT_ID = "syntara-orchestration"
 _EP_JWT_ISSUER = "http://localhost:8000"
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line(
-        "markers",
-        "e2e: live AO+EP stack (Konflux Kind or local demo)",
-    )
+_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _optional_env(*names: str) -> str | None:
@@ -211,7 +210,7 @@ def _mint_ep_service_token() -> str:
         import jwt
     except ImportError:
         pytest.fail("EP_SERVICE_TOKEN or PyJWT is required to query the Execution Plane")
-    key_path = Path(os.environ.get("EP_AO_JWT_PRIVATE_KEY_FILE") or _REPO_ROOT / ".secrets" / "jwt-primary.pem")
+    key_path = Path(os.environ.get("EP_AO_JWT_PRIVATE_KEY_FILE") or _BACKEND_ROOT / ".secrets" / "jwt-primary.pem")
     if not key_path.is_file():
         pytest.fail(f"AO JWT private key not found at {key_path}; set EP_AO_JWT_PRIVATE_KEY_FILE or EP_SERVICE_TOKEN")
     now = datetime.now(UTC)
@@ -265,14 +264,18 @@ def ao_client(ao_base_url: str, ao_admin_password: str) -> Iterator[AoClient]:
 def ep_base_url() -> str:
     url = _optional_env("EP_API_URL")
     if not url:
-        pytest.fail("EP_API_URL must be set to prove hello-world ran on the Execution Plane")
+        pytest.skip(
+            "EP_API_URL is not set; skipping the Execution Plane proof "
+            "(set it, plus EP_API_CA_FILE / EP_SERVICE_TOKEN or EP_AO_JWT_PRIVATE_KEY_FILE, "
+            "against a deployment with an Execution Plane to activate it)"
+        )
     return url.rstrip("/")
 
 
 @pytest.fixture(scope="session")
 def ep_client(ep_base_url: str) -> Iterator[EpClient]:
     ca_env = os.environ.get("EP_API_CA_FILE")
-    ca_file = Path(ca_env) if ca_env else _REPO_ROOT / ".secrets" / "certs" / "ca.pem"
+    ca_file = Path(ca_env) if ca_env else _BACKEND_ROOT / ".secrets" / "certs" / "ca.pem"
     if not ca_file.is_file():
         pytest.fail(f"EP API CA not found at {ca_file}; set EP_API_CA_FILE")
     client = EpClient(ep_base_url, _mint_ep_service_token(), ca_file)

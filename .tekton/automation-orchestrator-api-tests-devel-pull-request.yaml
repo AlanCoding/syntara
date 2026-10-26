@@ -455,7 +455,7 @@ spec:
           description: |
             Copy this syntara PR to $HOME/syntara-pipeline on the Kind VM so
             patch-ao-src-overlay, prepare-execution-plane, and run-e2e can
-            use tools/ci and tests/ep_e2e before deploy-ao finishes cloning
+            use tools/ci and the backend e2e suite before deploy-ao finishes cloning
             ~/syntara for the AO image overlay.
           params:
             - name: ssh-credentials-secret
@@ -537,8 +537,7 @@ spec:
                 test -f "${SRC_DIR}/tools/ci/konflux-prepare-execution-plane.sh"
                 test -f "${SRC_DIR}/tools/ci/patch-ao-activity-execution-lookup.py"
                 test -f "${SRC_DIR}/tools/create_ao_credential.py"
-                test -f "${SRC_DIR}/tools/konflux-run-e2e.sh"
-                test -f "${SRC_DIR}/tests/ep_e2e/test_hello_world_workflow.py"
+                test -f "${SRC_DIR}/backend/tests/e2e/execution_plane/test_hello_world_workflow.py"
 
                 echo "=== Staging pipeline source at ${SSH_USER}@${SSH_HOST}:\$HOME/syntara-pipeline ==="
                 ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" \
@@ -550,8 +549,7 @@ spec:
                   set -euo pipefail
                   SRC=\$HOME/syntara-pipeline
                   test -f \"\${SRC}/tools/ci/wait-for-myao-ready.sh\"
-                  test -f \"\${SRC}/tools/konflux-run-e2e.sh\"
-                  test -d \"\${SRC}/tests/ep_e2e\"
+                  test -f \"\${SRC}/backend/tests/e2e/execution_plane/conftest.py\"
                 "
 
       - name: stage-operator-source
