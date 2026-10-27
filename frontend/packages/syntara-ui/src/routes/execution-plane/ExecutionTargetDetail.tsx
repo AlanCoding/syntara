@@ -34,7 +34,8 @@ import { detachPromise } from '../../utils/detachPromise'
 import { useDocLink } from '../../utils/docs/useDocLink'
 
 import { ExecutionTargetStatusLabel } from './ExecutionTargetStatusLabel'
-import { RoutingLabelsCell } from './RoutingLabelsCell'
+import { getNodeSelectors } from './getNodeSelectors'
+import { NodeSelectorsCell } from './NodeSelectorsCell'
 
 type ExecutionTarget = ExecutionPlaneAPI.components['schemas']['ExecutionTargetFacadeRead']
 
@@ -68,6 +69,7 @@ function ClusterDetailValue({ target }: Readonly<{ target: ExecutionTarget }>) {
 function ExecutionTargetDetailsBody({ target }: Readonly<{ target: ExecutionTarget }>) {
   const placement = target.placement
   const namespace = placement?.type === 'kubernetes' && placement.namespace ? placement.namespace : null
+  const nodeSelectors = getNodeSelectors(placement)
 
   return (
     <SynPanelContentStack hasGutter>
@@ -107,7 +109,7 @@ function ExecutionTargetDetailsBody({ target }: Readonly<{ target: ExecutionTarg
           <StackItem>
             <SynDetailList isHorizontal>
               <SynDetail label="OpenShift node selector">
-                <RoutingLabelsCell labels={target.labels} />
+                <NodeSelectorsCell selectors={nodeSelectors} />
               </SynDetail>
             </SynDetailList>
           </StackItem>

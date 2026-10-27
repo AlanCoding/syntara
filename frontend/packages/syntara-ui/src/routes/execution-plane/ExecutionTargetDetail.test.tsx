@@ -58,7 +58,12 @@ const mockTarget = {
   name: 'Prod OpenShift West',
   backend_type: 'kubernetes',
   endpoint: 'https://api.west.example.com',
-  placement: { type: 'kubernetes' as const, namespace: 'syntara-workers', node_selectors: [], tolerations: [] },
+  placement: {
+    type: 'kubernetes' as const,
+    namespace: 'syntara-workers',
+    node_selectors: ['workload=automation'],
+    tolerations: [],
+  },
   status: 'ready',
   enabled: true,
   is_default: true,
@@ -114,7 +119,8 @@ describe('ExecutionTargetDetail', () => {
     expect(screen.getByText('syntara-workers')).toBeInTheDocument()
     expect(screen.getByText('Enabled')).toBeInTheDocument()
     expect(screen.getByText('Ready')).toBeInTheDocument()
-    expect(screen.getByText('region=us-west')).toBeInTheDocument()
+    expect(screen.getByText('workload=automation')).toBeInTheDocument()
+    expect(screen.queryByText('region=us-west')).not.toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
   })
 

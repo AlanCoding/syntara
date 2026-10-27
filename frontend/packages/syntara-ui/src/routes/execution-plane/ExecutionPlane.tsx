@@ -27,7 +27,8 @@ import { ExecutionPlaneEmptyState } from './ExecutionPlaneEmptyState'
 import { getExecutionPlaneFilterDefinitions } from './executionPlaneFilters'
 import { executionPlaneDefaultSort, executionPlaneTableColumns } from './executionPlaneTableColumns'
 import { ExecutionTargetStatusLabel } from './ExecutionTargetStatusLabel'
-import { RoutingLabelsCell } from './RoutingLabelsCell'
+import { getNodeSelectors } from './getNodeSelectors'
+import { NodeSelectorsCell } from './NodeSelectorsCell'
 
 type ExecutionTarget = ExecutionPlaneAPI.components['schemas']['ExecutionTargetFacadeRead']
 
@@ -51,7 +52,7 @@ function ExecutionPlaneTableContent({
           <Th width={15} sort={getSortParams('status')}>
             Status
           </Th>
-          <Th width={30}>Routing labels</Th>
+          <Th width={30}>OpenShift node selector</Th>
           <Th width={15} sort={getSortParams('enabled')}>
             State
           </Th>
@@ -71,8 +72,8 @@ function ExecutionPlaneTableContent({
             <Td dataLabel="Status">
               <ExecutionTargetStatusLabel status={target.status} message={target.status_message} />
             </Td>
-            <Td dataLabel="Routing labels">
-              <RoutingLabelsCell labels={target.labels} />
+            <Td dataLabel="OpenShift node selector">
+              <NodeSelectorsCell selectors={getNodeSelectors(target.placement)} />
             </Td>
             <Td dataLabel="State">
               <SynLabel variant="outline" status={target.enabled ? 'success' : 'custom'}>

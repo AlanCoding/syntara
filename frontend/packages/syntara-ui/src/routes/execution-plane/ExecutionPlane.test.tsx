@@ -60,7 +60,12 @@ const mockTargets = [
     name: 'Prod OpenShift West',
     backend_type: 'kubernetes',
     endpoint: 'https://api.west.example.com',
-    placement: { type: 'kubernetes' as const, namespace: 'syntara-workers', node_selectors: [], tolerations: [] },
+    placement: {
+      type: 'kubernetes' as const,
+      namespace: 'syntara-workers',
+      node_selectors: ['workload=automation'],
+      tolerations: [],
+    },
     status: 'active',
     enabled: true,
     is_default: true,
@@ -75,7 +80,12 @@ const mockTargets = [
     name: 'Staging OpenShift',
     backend_type: 'kubernetes',
     endpoint: 'https://api.staging.example.com',
-    placement: { type: 'kubernetes' as const, namespace: 'syntara-staging', node_selectors: [], tolerations: [] },
+    placement: {
+      type: 'kubernetes' as const,
+      namespace: 'syntara-staging',
+      node_selectors: [],
+      tolerations: [],
+    },
     status: 'bootstrapping',
     enabled: false,
     is_default: false,
@@ -114,7 +124,8 @@ describe('ExecutionPlane', () => {
     expect(screen.getByRole('link', { name: 'Staging OpenShift' })).toHaveAttribute('href', '/execution-plane/et-002')
     expect(screen.getByText('cl-001')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
-    expect(screen.getByText('region=us-west')).toBeInTheDocument()
+    expect(screen.getByText('workload=automation')).toBeInTheDocument()
+    expect(screen.queryByText('region=us-west')).not.toBeInTheDocument()
     expect(screen.getByRole('row', { name: /Prod OpenShift West.*Enabled/ })).toBeInTheDocument()
     expect(screen.getByRole('row', { name: /Staging OpenShift.*Disabled/ })).toBeInTheDocument()
   })
@@ -288,13 +299,13 @@ describe('ExecutionPlane', () => {
   it('renders sortable headers for name, cluster, status, and state', () => {
     render(<ExecutionPlane />, { wrapper })
 
-    for (const name of [/^Name$/i, /^Cluster$/i, /^Status$/i, /^State$/i]) {
+    for (const name of [/^Name$/i, /^OpenShift Cluster$/i, /^Status$/i, /^State$/i]) {
       const header = screen.getByRole('columnheader', { name })
       expect(within(header).getByRole('button')).toBeInTheDocument()
     }
 
-    const labelsHeader = screen.getByRole('columnheader', { name: /Routing labels/i })
-    expect(within(labelsHeader).queryByRole('button')).not.toBeInTheDocument()
+    const nodeSelectorHeader = screen.getByRole('columnheader', { name: /OpenShift node selector/i })
+    expect(within(nodeSelectorHeader).queryByRole('button')).not.toBeInTheDocument()
   })
 
   it('writes sort URL param when a column header is clicked', async () => {
@@ -309,11 +320,11 @@ describe('ExecutionPlane', () => {
     })
   })
 
-  it('can sort by cluster_id via the Cluster column', async () => {
+  it('can sort by cluster_id via the OpenShift Cluster column', async () => {
     const user = userEvent.setup()
     render(<ExecutionPlane />, { wrapper })
 
-    const clusterHeader = screen.getByRole('columnheader', { name: /^Cluster$/i })
+    const clusterHeader = screen.getByRole('columnheader', { name: /^OpenShift Cluster$/i })
     await user.click(within(clusterHeader).getByRole('button'))
 
     await waitFor(() => {
