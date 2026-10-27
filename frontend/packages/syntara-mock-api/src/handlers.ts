@@ -443,6 +443,8 @@ export const handlers = [
     }
 
     const url = new URL(request.url)
+    const id = url.searchParams.get('id')
+    const clusterId = url.searchParams.get('cluster_id')
     const nameContains = url.searchParams.get('name[contains]')
     const statusEq = url.searchParams.get('status')
     const statusIn = url.searchParams.get('status[in]')
@@ -456,6 +458,12 @@ export const handlers = [
     const includeTotal = url.searchParams.get('include_total') === 'true'
 
     let filtered = [...executionTargets]
+    if (id) {
+      filtered = filtered.filter((target) => target.id === id)
+    }
+    if (clusterId) {
+      filtered = filtered.filter((target) => target.cluster_id === clusterId)
+    }
     if (nameContains) {
       const lower = nameContains.toLowerCase()
       filtered = filtered.filter((target) => target.name.toLowerCase().includes(lower))
@@ -527,6 +535,37 @@ export const handlers = [
     }
 
     return HttpResponse.json(paginate(filtered, cursor, limit, includeTotal))
+  }),
+
+  http.get('/api/execution_plane/v1/execution_targets/:target_id', ({ request, params }) => {
+    const username = getUsernameFromRequest(request)
+    if (username !== 'admin' && username !== 'auditor') {
+      return HttpResponse.json(
+        {
+          type: 'https://api.example.com/errors/forbidden',
+          title: 'Forbidden',
+          detail: 'Insufficient permissions for execution_target:read',
+          code: 'FORBIDDEN',
+          retryable: false,
+        },
+        { status: 403 }
+      )
+    }
+
+    const target = executionTargets.find((item) => item.id === params.target_id)
+    if (!target) {
+      return HttpResponse.json(
+        {
+          type: 'https://api.example.com/errors/not-found',
+          title: 'Not Found',
+          detail: `Execution target ${params.target_id as string} not found`,
+          code: 'NOT_FOUND',
+          retryable: false,
+        },
+        { status: 404 }
+      )
+    }
+    return HttpResponse.json(target)
   }),
 
   http.get('/api/v1/integrations', ({ request }) => {
