@@ -1136,6 +1136,22 @@ spec:
                   kubectl logs -n aap27-next deploy/myao-worker --tail=80 2>&1 || true
                   echo ''
 
+                  echo '=== myao-temporal logs ==='
+                  kubectl logs -n aap27-next deploy/myao-temporal --tail=120 2>&1 || true
+                  echo ''
+
+                  echo '=== Pods with restarts ==='
+                  kubectl get pods -A --no-headers 2>/dev/null | awk '\$3 !~ /^0(\/|\$)/ {print}' || true
+                  echo ''
+
+                  echo '=== Kernel OOM killer logs ==='
+                  sudo dmesg -T 2>/dev/null | grep -iE 'oom|killed process|out of memory|memory cgroup' || echo 'No OOM events found'
+                  echo ''
+
+                  echo '=== Kernel logs (last 200 lines) ==='
+                  sudo dmesg -T 2>/dev/null | tail -200 || echo 'dmesg not available'
+                  echo ''
+
                   echo '=== Pod status (aap27-next) ==='
                   kubectl get pods -n aap27-next -o wide 2>&1 || true
                   echo ''
