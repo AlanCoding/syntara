@@ -30,6 +30,7 @@ import { SynErrorState } from '../../components/states/SynErrorState'
 import { useQueryState } from '../../components/states/useQueryState'
 import { SynLink } from '../../components/SynLink'
 import { SynPageTitle } from '../../components/SynPageTitle'
+import { getErrorStatus } from '../../utils/apiErrors'
 import { detachPromise } from '../../utils/detachPromise'
 import { useDocLink } from '../../utils/docs/useDocLink'
 
@@ -145,20 +146,21 @@ export default function ExecutionTargetDetail() {
 
   const query = executionPlaneClient.useQuery(
     'get',
-    '/api/execution_plane/v1/execution_targets',
+    '/api/execution_plane/v1/execution_targets/{target_id}',
     {
-      params: { query: { id: executionTargetId, limit: 1 } },
+      params: { path: { target_id: executionTargetId ?? '' } },
     },
     { enabled: hasId, refetchInterval: 30_000 }
   )
 
-  const target = query.data?.resources?.[0]
+  const target = query.data
   const queryState = useQueryState(query, {
     title: 'Error loading execution target',
     onRetry: () => detachPromise(query.refetch()),
   })
 
   const navigateBack = () => detachPromise(navigate({ to: AppRoute.ExecutionPlane.Root }))
+  const retry = () => detachPromise(query.refetch())
 
   if (!hasId) {
     return (
@@ -168,16 +170,21 @@ export default function ExecutionTargetDetail() {
     )
   }
 
+  // Domain-specific empty state for missing targets; useQueryState handles other errors.
+  if (getErrorStatus(query.error) === 404) {
+    return (
+      <ExecutionTargetDetailEarlyShell>
+        <ExecutionTargetNotFound onRetry={retry} onBack={navigateBack} />
+      </ExecutionTargetDetailEarlyShell>
+    )
+  }
+
   if (queryState) {
     return <ExecutionTargetDetailEarlyShell>{queryState}</ExecutionTargetDetailEarlyShell>
   }
 
   if (!target) {
-    return (
-      <ExecutionTargetDetailEarlyShell>
-        <ExecutionTargetNotFound onRetry={() => detachPromise(query.refetch())} onBack={navigateBack} />
-      </ExecutionTargetDetailEarlyShell>
-    )
+    return null
   }
 
   return (

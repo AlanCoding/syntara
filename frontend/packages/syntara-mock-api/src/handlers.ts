@@ -537,6 +537,37 @@ export const handlers = [
     return HttpResponse.json(paginate(filtered, cursor, limit, includeTotal))
   }),
 
+  http.get('/api/execution_plane/v1/execution_targets/:target_id', ({ request, params }) => {
+    const username = getUsernameFromRequest(request)
+    if (username !== 'admin' && username !== 'auditor') {
+      return HttpResponse.json(
+        {
+          type: 'https://api.example.com/errors/forbidden',
+          title: 'Forbidden',
+          detail: 'Insufficient permissions for execution_target:read',
+          code: 'FORBIDDEN',
+          retryable: false,
+        },
+        { status: 403 }
+      )
+    }
+
+    const target = executionTargets.find((item) => item.id === params.target_id)
+    if (!target) {
+      return HttpResponse.json(
+        {
+          type: 'https://api.example.com/errors/not-found',
+          title: 'Not Found',
+          detail: `Execution target ${params.target_id as string} not found`,
+          code: 'NOT_FOUND',
+          retryable: false,
+        },
+        { status: 404 }
+      )
+    }
+    return HttpResponse.json(target)
+  }),
+
   http.get('/api/v1/integrations', ({ request }) => {
     const url = new URL(request.url)
     const nameContains = url.searchParams.get('name[contains]')

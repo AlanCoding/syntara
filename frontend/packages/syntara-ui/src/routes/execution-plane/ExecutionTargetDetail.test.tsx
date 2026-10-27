@@ -75,7 +75,7 @@ const mockTarget = {
 
 function mockFacadeQuery(overrides: Record<string, unknown> = {}) {
   vi.mocked(executionPlaneClient.useQuery).mockReturnValue({
-    data: { resources: [mockTarget], next: null, prev: null, total: 1 },
+    data: mockTarget,
     isPending: false,
     isFetching: false,
     error: null,
@@ -96,9 +96,9 @@ describe('ExecutionTargetDetail', () => {
 
     const call = vi.mocked(executionPlaneClient.useQuery).mock.calls[0]
     expect(call?.[0]).toBe('get')
-    expect(call?.[1]).toBe('/api/execution_plane/v1/execution_targets')
+    expect(call?.[1]).toBe('/api/execution_plane/v1/execution_targets/{target_id}')
     expect(call?.[2]).toEqual({
-      params: { query: { id: 'et-001', limit: 1 } },
+      params: { path: { target_id: 'et-001' } },
     })
   })
 
@@ -126,12 +126,7 @@ describe('ExecutionTargetDetail', () => {
 
   it('shows Cluster as plain text when integration_id label is absent', async () => {
     mockFacadeQuery({
-      data: {
-        resources: [{ ...mockTarget, labels: { region: 'us-west' } }],
-        next: null,
-        prev: null,
-        total: 1,
-      },
+      data: { ...mockTarget, labels: { region: 'us-west' } },
     })
 
     render(<ExecutionTargetDetail />, { wrapper })
@@ -143,18 +138,11 @@ describe('ExecutionTargetDetail', () => {
   it('shows em dash for execution namespace on RHEL placement', async () => {
     mockFacadeQuery({
       data: {
-        resources: [
-          {
-            ...mockTarget,
-            name: 'RHEL Edge Lab',
-            placement: { type: 'rhel' as const },
-            enabled: false,
-            labels: {},
-          },
-        ],
-        next: null,
-        prev: null,
-        total: 1,
+        ...mockTarget,
+        name: 'RHEL Edge Lab',
+        placement: { type: 'rhel' as const },
+        enabled: false,
+        labels: {},
       },
     })
 
@@ -165,11 +153,12 @@ describe('ExecutionTargetDetail', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('shows not-found state with back and retry when the facade returns no match', async () => {
+  it('shows not-found state with back and retry on 404', async () => {
     const user = userEvent.setup()
     const refetch = vi.fn()
     mockFacadeQuery({
-      data: { resources: [], next: null, prev: null, total: 0 },
+      data: undefined,
+      error: Object.assign(new Error('Not found'), { status: 404 }),
       refetch,
     })
 
