@@ -6,7 +6,7 @@ import type { SortableColumn, SortConfig } from '../../types/sorting'
  */
 export const executionPlaneTableColumns: SortableColumn[] = [
   { field: 'name', label: 'Name', isSortable: true },
-  { field: 'cluster_id', label: 'Cluster', isSortable: true },
+  { field: 'cluster_id', label: 'OpenShift Cluster', isSortable: true },
   { field: 'status', label: 'Status', isSortable: true },
   { field: 'node_selectors', label: 'OpenShift node selector' },
   { field: 'enabled', label: 'State', isSortable: true },

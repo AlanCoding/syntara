@@ -66,7 +66,7 @@ function ExecutionPlaneTableContent({
                 <Truncate content={target.name} />
               </LinkCell>
             </Td>
-            <Td dataLabel="Cluster">
+            <Td dataLabel="OpenShift Cluster">
               <Truncate content={target.cluster_id} />
             </Td>
             <Td dataLabel="Status">

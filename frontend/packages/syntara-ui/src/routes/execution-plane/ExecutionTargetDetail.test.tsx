@@ -64,7 +64,7 @@ const mockTarget = {
     node_selectors: ['workload=automation'],
     tolerations: [],
   },
-  status: 'ready',
+  status: 'active',
   enabled: true,
   is_default: true,
   status_message: null,
@@ -118,7 +118,7 @@ describe('ExecutionTargetDetail', () => {
     expect(screen.getByText('Execution namespace')).toBeInTheDocument()
     expect(screen.getByText('syntara-workers')).toBeInTheDocument()
     expect(screen.getByText('Enabled')).toBeInTheDocument()
-    expect(screen.getByText('Ready')).toBeInTheDocument()
+    expect(screen.getByText('Active')).toBeInTheDocument()
     expect(screen.getByText('workload=automation')).toBeInTheDocument()
     expect(screen.queryByText('region=us-west')).not.toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
