@@ -10,7 +10,6 @@ import { useCanI } from '../../hooks/useCanI'
 import { AlertProvider } from '../../providers/alerts'
 import { assertUrlParam } from '../../test/filter-test-helpers'
 import { expectPageTitle } from '../../test/pageTitle'
-import { routerTestState } from '../../test/setup'
 
 import ExecutionPlane from './ExecutionPlane'
 
@@ -24,10 +23,6 @@ vi.mock('../../client', () => ({
 
 vi.mock('../../hooks/useCanI', () => ({
   useCanI: vi.fn(() => ({ allowed: true, isChecking: false, isError: false })),
-}))
-
-vi.mock('wouter', () => ({
-  useLocation: () => ['/execution-plane', routerTestState.navigate],
 }))
 
 vi.mock('../../hooks/routing/useLocation', () => ({
