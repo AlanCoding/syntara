@@ -66,9 +66,13 @@ spec:
     - name: ao-pr-number
       value: '{{pull_request_number}}'
     # aap-dev branch that can build and deploy the Execution Plane and the
-    # operator from source (ansible/aap-dev#1111).
+    # operator from source (ansible/aap-dev#1111). Pinned to the
+    # postgres max_connections=500 branch (ansible/aap-dev#1132) until it
+    # merges — the default 200 is exhausted by the full e2e stack and
+    # Postgres resets backends mid-suite (the stuck-execution stalls
+    # blocking this PR's CI; see aap-dev#1132 for the evidence).
     - name: aap-dev-revision
-      value: AAP-90779-ep-from-source
+      value: goneri/bump-postgres-max-connections
     # Operator branch that honors ENABLE_EXECUTION_PLANE in
     # {cr-name}-admin-settings; the prebuilt devel bundle ignores it
     # (automation-orchestrator-operator#1573).
