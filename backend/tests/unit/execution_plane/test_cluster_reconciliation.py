@@ -40,14 +40,10 @@ def test_worker_uses_shared_reconciliation_coordination(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         integration_sync, "get_settings", lambda: SimpleNamespace(ep_cluster_reconciliation_interval_seconds=300)
     )
-    integration_sync.get_cluster_reconciliation_worker.cache_clear()
-    try:
-        periodic = integration_sync.get_cluster_reconciliation_worker()
-        assert periodic._interval_seconds == 300
-        assert periodic._callback is integration_sync.reconcile_integration_clusters
-        assert periodic._coordinate is False  # Core also coordinates manual and immediate runs.
-    finally:
-        integration_sync.get_cluster_reconciliation_worker.cache_clear()
+    periodic = integration_sync.get_cluster_reconciliation_worker()
+    assert periodic._interval_seconds == 300
+    assert periodic._callback is integration_sync.reconcile_integration_clusters
+    assert periodic._coordinate is False  # Core also coordinates manual and immediate runs.
 
 
 @pytest.mark.asyncio

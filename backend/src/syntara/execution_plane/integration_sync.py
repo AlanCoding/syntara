@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import structlog
@@ -101,7 +100,6 @@ async def reconcile_saved_integration(session: AsyncSession, integration: Integr
     await reconcile_integration_clusters(session_factory, integration.id)
 
 
-@lru_cache(maxsize=1)
 def get_cluster_reconciliation_worker() -> PeriodicWorker:
     """Use core coordination so manual and immediate runs share the scheduled run's lock."""
     return PeriodicWorker(
