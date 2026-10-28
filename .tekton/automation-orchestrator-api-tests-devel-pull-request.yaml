@@ -66,9 +66,13 @@ spec:
     - name: ao-pr-number
       value: '{{pull_request_number}}'
     # aap-dev branch that can build and deploy the Execution Plane and the
-    # operator from source (ansible/aap-dev#1111).
+    # operator from source (ansible/aap-dev#1111). Pinned to the
+    # postgres max_connections=500 branch (ansible/aap-dev#1132) until it
+    # merges — the default 200 is exhausted by the full e2e stack and
+    # Postgres resets backends mid-suite (the stuck-execution stalls
+    # blocking this PR's CI; see aap-dev#1132 for the evidence).
     - name: aap-dev-revision
-      value: AAP-90779-ep-from-source
+      value: goneri/bump-postgres-max-connections
     # Operator branch that honors ENABLE_EXECUTION_PLANE in
     # {cr-name}-admin-settings; the prebuilt devel bundle ignores it
     # (automation-orchestrator-operator#1573).
@@ -455,7 +459,7 @@ spec:
           description: |
             Copy this syntara PR to $HOME/syntara-pipeline on the Kind VM so
             patch-ao-src-overlay, prepare-execution-plane, and run-e2e can
-            use tools/ci and tests/ep_e2e before deploy-ao finishes cloning
+            use tools/ci and the backend e2e suite before deploy-ao finishes cloning
             ~/syntara for the AO image overlay.
           params:
             - name: ssh-credentials-secret
@@ -537,8 +541,7 @@ spec:
                 test -f "${SRC_DIR}/tools/ci/konflux-prepare-execution-plane.sh"
                 test -f "${SRC_DIR}/tools/ci/patch-ao-activity-execution-lookup.py"
                 test -f "${SRC_DIR}/tools/create_ao_credential.py"
-                test -f "${SRC_DIR}/tools/konflux-run-e2e.sh"
-                test -f "${SRC_DIR}/tests/ep_e2e/test_hello_world_workflow.py"
+                test -f "${SRC_DIR}/backend/tests/e2e/execution_plane/test_hello_world_workflow.py"
 
                 echo "=== Staging pipeline source at ${SSH_USER}@${SSH_HOST}:\$HOME/syntara-pipeline ==="
                 ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" \
@@ -550,8 +553,7 @@ spec:
                   set -euo pipefail
                   SRC=\$HOME/syntara-pipeline
                   test -f \"\${SRC}/tools/ci/wait-for-myao-ready.sh\"
-                  test -f \"\${SRC}/tools/konflux-run-e2e.sh\"
-                  test -d \"\${SRC}/tests/ep_e2e\"
+                  test -f \"\${SRC}/backend/tests/e2e/execution_plane/conftest.py\"
                 "
 
       - name: stage-operator-source
@@ -1136,6 +1138,22 @@ spec:
 
                   echo '=== myao-worker logs ==='
                   kubectl logs -n aap27-next deploy/myao-worker --tail=80 2>&1 || true
+                  echo ''
+
+                  echo '=== myao-temporal logs ==='
+                  kubectl logs -n aap27-next deploy/myao-temporal --tail=120 2>&1 || true
+                  echo ''
+
+                  echo '=== Pods with restarts ==='
+                  kubectl get pods -A --no-headers 2>/dev/null | awk '\$3 !~ /^0(\/|\$)/ {print}' || true
+                  echo ''
+
+                  echo '=== Kernel OOM killer logs ==='
+                  sudo dmesg -T 2>/dev/null | grep -iE 'oom|killed process|out of memory|memory cgroup' || echo 'No OOM events found'
+                  echo ''
+
+                  echo '=== Kernel logs (last 200 lines) ==='
+                  sudo dmesg -T 2>/dev/null | tail -200 || echo 'dmesg not available'
                   echo ''
 
                   echo '=== Pod status (aap27-next) ==='
